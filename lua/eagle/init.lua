@@ -4,6 +4,7 @@ local mouse_handler = require('eagle.mouse_handler')
 local keyboard_handler = require('eagle.keyboard_handler')
 
 local M = {}
+M.ignore_cursor_moved = false
 
 function M.setup(opts)
   -- a bool variable to detect if the mouse is moving, binded with the <MouseMove> event
@@ -100,7 +101,13 @@ function M.setup(opts)
   end
 
   vim.api.nvim_create_autocmd("CursorMoved", {
+    nested = true,
     callback = function()
+      if M.ignore_cursor_moved then
+        M.ignore_cursor_moved = false
+        return
+      end
+
       if util.eagle_win and vim.api.nvim_win_is_valid(util.eagle_win) and vim.api.nvim_get_current_win() ~= util.eagle_win then
         vim.api.nvim_win_close(util.eagle_win, false)
         mouse_handler.win_lock = 0

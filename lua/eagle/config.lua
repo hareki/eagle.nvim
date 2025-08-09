@@ -23,6 +23,8 @@ local defaults = {
   --added an improved way to stylize markdown that is visually identical to vim.lsp.buf.hover()
   --disable if you encounter any issues
   improved_markdown = true,
+  -- callback when the eagle window is opened
+  on_open = nil,
 
   --mouse mode is the default mode for this plugin
   --disable if you want pure keyboard mode

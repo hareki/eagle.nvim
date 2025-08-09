@@ -469,7 +469,29 @@ local function stylize_markdown_buffer(bufnr, contents, opts)
     local width = opts.width or vim.api.nvim_win_get_width(0)
     local normalized = {}
     local in_code_block = false
+    local highlight_lines = {}
 
+    local function push_hl_render(line, hl_group)
+        if in_code_block then
+        table.insert(normalized, line)
+        if hl_group then
+            table.insert(highlight_lines, { line = #normalized - 1, hl = hl_group })
+        end
+        return
+        end
+
+        local before = #normalized
+        local wrapped = vim.fn.split(line, [[\%]] .. width .. [[v]])
+        vim.list_extend(normalized, wrapped)
+
+        if hl_group then
+        -- highlight the first physical line created by this push
+        table.insert(highlight_lines, { line = before, hl = hl_group })
+        end
+    end
+
+    local render_config = type(config.options.improved_markdown) == "boolean" and {}
+                              or config.options.improved_markdown
     for _, line in ipairs(contents) do
         if line:match("^```") then
             -- Toggle code block status
@@ -477,16 +499,27 @@ local function stylize_markdown_buffer(bufnr, contents, opts)
             -- Add the line to track where code blocks start and end
             table.insert(normalized, line)
         elseif line == "---" then
-            -- Render a full-width horizontal line for `---`
-            table.insert(normalized, string.rep("─", width))
+            if render_config.replace_dashes then
+                -- Render a full-width horizontal line for `---`
+                table.insert(normalized, string.rep("─", width))
+            else
+                table.insert(normalized, line)
+            end
         else
             if in_code_block then
                 --skip wrapping within code blocks
                 table.insert(normalized, line)
             else
-                -- Wrap non-code lines at the specified width
-                local wrapped = vim.fn.split(line, [[\%]] .. width .. [[v]])
-                vim.list_extend(normalized, wrapped)
+                local severity = line:match("^%s*>%[%!(%u+)%]")
+                local severity_renderer = render_config.severity_renderer
+                if severity and severity_renderer and severity_renderer[severity] then
+                    local render  = severity_renderer[severity]
+                    push_hl_render(render.text, render.hl)
+                else
+                    -- Wrap non-code lines at the specified width
+                    local wrapped = vim.fn.split(line, [[\%]] .. width .. [[v]])
+                    vim.list_extend(normalized, wrapped)
+                end
             end
         end
     end
@@ -498,6 +531,29 @@ local function stylize_markdown_buffer(bufnr, contents, opts)
 
     vim.wo[0].conceallevel = config.options.conceallevel
     vim.wo[0].concealcursor = config.options.concealcursor
+
+    -- Add left padding to all lines in the buffer
+	local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+	for i, line in ipairs(lines) do
+		lines[i] = " " .. line
+	end
+	vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+
+    if #highlight_lines > 0 then
+        vim.schedule(function()
+        for _, h in ipairs(highlight_lines) do
+            local text = lines[h.line + 1] or ""
+            -- color the entire line; remove hl_eol if you prefer exact width via end_col
+            vim.api.nvim_buf_set_extmark(bufnr, vim.api.nvim_create_namespace("markdown_callout_titles"), h.line, 0, {
+                hl_group = h.hl,
+                hl_eol = true,
+                end_col = #text,
+                hl_mode = "combine",
+                priority = 200,
+            })
+        end
+        end)
+    end
 end
 
 
@@ -509,57 +565,60 @@ function M.create_eagle_win(keyboard_event)
     local has_lsp_info = config.options.show_lsp_info and #M.lsp_info > 0
 
     local function add_diagnostics()
-        if has_diagnostics then
-            if config.options.show_headers then
-                table.insert(messages, "# Diagnostics")
-                table.insert(messages, "")
-            end
-        else
+        if not has_diagnostics then
             return
         end
 
-        for i, diagnostic_message in ipairs(M.diagnostic_messages) do
-            local message_parts = vim.split(diagnostic_message.message, "\n", { trimempty = false })
-            for _, part in ipairs(message_parts) do
-                if #M.diagnostic_messages > 1 then
-                    table.insert(messages, i .. ". " .. part)
-                else
-                    table.insert(messages, part)
+        if config.options.show_headers then
+            table.insert(messages, "# Diagnostics")
+            table.insert(messages, "")
+        end
+
+        local severity_title = {
+            [vim.diagnostic.severity.ERROR] = "ERROR",
+            [vim.diagnostic.severity.WARN] = "WARNING",
+            [vim.diagnostic.severity.INFO] = "INFO",
+            [vim.diagnostic.severity.HINT] = "HINT",
+        }
+
+        for i, d in ipairs(M.diagnostic_messages) do
+            local title = severity_title[d.severity]
+
+            table.insert(messages, ">[!" .. title .. "]") -- title line
+            -- table.insert(messages, ">") -- blank line inside quote
+
+            -- message body (may span multiple lines)
+            local message_parts = vim.split(d.message, "\n", { trimempty = false })
+            for msg_index, part in ipairs(message_parts) do
+                if msg_index == #message_parts then
+                    -- This is the last line, append meta info if it exists
+                    local meta = nil
+
+                    if d.source and d.code then
+                        -- e.g. "Lua Diagnostic (undefined-global)"
+                        meta = string.format(" — *%s (%s)*", d.source, d.code)
+                    elseif d.source then
+                        meta = string.format(" — *%s*", d.source)
+                    elseif d.code then
+                        -- rare case: a server fills only the code field
+                        meta = string.format(" — *%s*", d.code)
+                    end
+
+                    if meta then
+                        part = part .. meta
+                    end
                 end
+                table.insert(messages, part) -- quoted line
             end
-
-            local severity = diagnostic_message.severity
-
-            if severity == 1 then
-                severity = "Error"
-            elseif severity == 2 then
-                severity = "Warning"
-            elseif severity == 3 then
-                severity = "Info"
-            elseif severity == 4 then
-                severity = "Hint"
-            end
-
-            table.insert(messages, "severity: " .. severity)
-            table.insert(messages, "source: " .. diagnostic_message.source)
-
-            -- some diagnostics may not fill the code field
-            if diagnostic_message.code then
-                table.insert(messages, "code: " .. diagnostic_message.code)
-            end
-
-            -- some diagnostics may not fill the hypertext reference field
-            local href = diagnostic_message.user_data and
-                diagnostic_message.user_data.lsp and diagnostic_message.user_data.lsp.codeDescription and
-                diagnostic_message.user_data.lsp.codeDescription.href
+            local href = d.user_data and d.user_data.lsp and d.user_data.lsp.codeDescription and d.user_data.lsp.codeDescription.href
 
             if href then
-                table.insert(messages, "href: " .. diagnostic_message.user_data.lsp.codeDescription.href)
+                table.insert(messages, "[More info](" .. href .. ")")
             end
 
-            -- newline
+            -- add a blank line after each call-out except the last one
             if i < #M.diagnostic_messages then
-                table.insert(messages, "")
+                table.insert(messages, " \n")
             end
         end
     end
@@ -700,6 +759,10 @@ function M.create_eagle_win(keyboard_event)
         border = config.options.border,
         focusable = focusable,
     })
+
+    if config.options.on_open then
+        config.options.on_open(M.eagle_win, eagle_buf)
+    end
 end
 
 return M
