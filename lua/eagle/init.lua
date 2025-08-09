@@ -4,6 +4,8 @@ local mouse_handler = require('eagle.mouse_handler')
 local keyboard_handler = require('eagle.keyboard_handler')
 
 local M = {}
+-- noautocmd dosen't work with the CursorMoved event
+-- https://github.com/vim/vim/issues/2084
 M.ignore_cursor_moved = false
 
 function M.setup(opts)
