@@ -731,7 +731,7 @@ function M.create_eagle_win(keyboard_event)
 
     -- Calculate the window height based on the number of lines in the buffer
     local height = math.min(vim.api.nvim_buf_line_count(eagle_buf),
-        math.floor(vim.o.lines / config.options.max_height_factor))
+        math.floor(vim.o.lines / config.options.max_height_factor)) + config.options.height_offset
 
     -- need + 1 for hyperlinks (shift + click)
     local width = math.max(max_line_width + config.options.scrollbar_offset + 1,

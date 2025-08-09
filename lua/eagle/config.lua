@@ -54,6 +54,9 @@ local defaults = {
   --If you don't know what I'm talking about, then
   --you don't need this option.
   scrollbar_offset = 0,
+  --Offset that handles possible height offset plugins
+  --e.g. render-markdown.nvim deletes the triple backtick code fence in codeblocks
+  height_offset = 0,
 
   --limit the width of the eagle window to the floor of vim.o.columns / max_width_factor
   --it should be any float number in the range [1.1, 5.0]
