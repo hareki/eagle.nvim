@@ -629,44 +629,45 @@ function M.create_eagle_win(keyboard_event)
     render_above = false
   end
 
-  -- Adjust the order and insert '---' appropriately
+  -- Adjust the order and insert '___' appropriately
+  -- Use this instead of "---" to avoid conflict with heading setext
   if config.options.order == 1 then
     add_diagnostics()
     if has_diagnostics and has_lsp_info then
-      table.insert(messages, "---")
+      table.insert(messages, "___")
     end
     add_lsp_info()
   elseif config.options.order == 2 then
     if render_above then
       add_diagnostics()
       if has_diagnostics and has_lsp_info then
-        table.insert(messages, "---")
+        table.insert(messages, "___")
       end
       add_lsp_info()
     else
       add_lsp_info()
       if has_diagnostics and has_lsp_info then
-        table.insert(messages, "---")
+        table.insert(messages, "___")
       end
       add_diagnostics()
     end
   elseif config.options.order == 3 then
     add_lsp_info()
     if has_diagnostics and has_lsp_info then
-      table.insert(messages, "---")
+      table.insert(messages, "___")
     end
     add_diagnostics()
   elseif config.options.order == 4 then
     if render_above then
       add_lsp_info()
       if has_diagnostics and has_lsp_info then
-        table.insert(messages, "---")
+        table.insert(messages, "___")
       end
       add_diagnostics()
     else
       add_diagnostics()
       if has_diagnostics and has_lsp_info then
-        table.insert(messages, "---")
+        table.insert(messages, "___")
       end
       add_lsp_info()
     end
