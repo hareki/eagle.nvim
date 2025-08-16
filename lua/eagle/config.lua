@@ -23,6 +23,9 @@ local defaults = {
   --added an improved way to stylize markdown that is visually identical to vim.lsp.buf.hover()
   --disable if you encounter any issues
   improved_markdown = true,
+  ---@alias DiagnosticFormatter fun(diagnostic: vim.diagnostic.Diagnostic): string
+  ---@type table<string, DiagnosticFormatter>
+  source_formatters = {},
   -- callback when the eagle window is opened
   on_open = nil,
 

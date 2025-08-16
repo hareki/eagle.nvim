@@ -39,11 +39,26 @@ local function format_lines(max_width)
     return
   end
 
+  local highlight_lines = {}
+  local render_config = type(config.options.improved_markdown) == "boolean" and {} or config.options.improved_markdown
+
   -- Iterate over the lines in the buffer
   local i = 0
   while i < vim.api.nvim_buf_line_count(eagle_buf) do
     -- Get the current line
     local line = vim.api.nvim_buf_get_lines(eagle_buf, i, i + 1, false)[1]
+
+    -- Handle severity callouts when improved_markdown is enabled
+    if config.options.improved_markdown then
+      local severity, meta = line:match("^%s*>%[%!(%u+)%s*—%s*(.+)%]")
+      local severity_renderer = render_config.severity_renderer
+      if severity and meta and severity_renderer and severity_renderer[severity] then
+        local render = severity_renderer[severity]
+        table.insert(highlight_lines, { line = i, hl = render.hl })
+        line = render.icon .. meta
+        vim.api.nvim_buf_set_lines(eagle_buf, i, i + 1, false, { line })
+      end
+    end
 
     -- If the line is too long
     if vim.fn.strdisplaywidth(line) > max_width then
@@ -81,6 +96,23 @@ local function format_lines(max_width)
 
     -- Move to the next line
     i = i + 1
+  end
+
+  -- Add left padding to all lines in the buffer
+  local lines = vim.api.nvim_buf_get_lines(eagle_buf, 0, -1, false)
+  for index, line in ipairs(lines) do
+    lines[index] = " " .. line
+  end
+  vim.api.nvim_buf_set_lines(eagle_buf, 0, -1, false, lines)
+
+  -- Apply highlight lines if any were collected
+  if #highlight_lines > 0 then
+    vim.schedule(function()
+      for _, h in ipairs(highlight_lines) do
+        local ns = vim.api.nvim_create_namespace("markdown_callout_titles")
+        vim.api.nvim_buf_add_highlight(eagle_buf, ns, h.hl, h.line, 0, -1)
+      end
+    end)
   end
 end
 
@@ -476,58 +508,13 @@ local function stylize_markdown_buffer(bufnr, contents, opts)
   -- Set default width if not provided
   local width = opts.width or vim.api.nvim_win_get_width(0)
   local normalized = {}
-  local in_code_block = false
-  local highlight_lines = {}
-
-  local function push_hl_render(line, hl_group)
-    if in_code_block then
-      table.insert(normalized, line)
-      if hl_group then
-        table.insert(highlight_lines, { line = #normalized - 1, hl = hl_group })
-      end
-      return
-    end
-
-    local before = #normalized
-    local wrapped = vim.fn.split(line, [[\%]] .. width .. [[v]])
-    vim.list_extend(normalized, wrapped)
-
-    if hl_group then
-      -- highlight the first physical line created by this push
-      table.insert(highlight_lines, { line = before, hl = hl_group })
-    end
-  end
 
   local render_config = type(config.options.improved_markdown) == "boolean" and {} or config.options.improved_markdown
   for _, line in ipairs(contents) do
-    if line:match("^```") then
-      -- Toggle code block status
-      in_code_block = not in_code_block
-      -- Add the line to track where code blocks start and end
-      table.insert(normalized, line)
-    elseif line == "---" then
-      if render_config.replace_dashes then
-        -- Render a full-width horizontal line for `---`
-        table.insert(normalized, string.rep("─", width))
-      else
-        table.insert(normalized, line)
-      end
+    if line == "---" and render_config.replace_dashes then
+      table.insert(normalized, string.rep("─", width))
     else
-      if in_code_block then
-        --skip wrapping within code blocks
-        table.insert(normalized, line)
-      else
-        local severity = line:match("^%s*>%[%!(%u+)%]")
-        local severity_renderer = render_config.severity_renderer
-        if severity and severity_renderer and severity_renderer[severity] then
-          local render = severity_renderer[severity]
-          push_hl_render(render.text, render.hl)
-        else
-          -- Wrap non-code lines at the specified width
-          local wrapped = vim.fn.split(line, [[\%]] .. width .. [[v]])
-          vim.list_extend(normalized, wrapped)
-        end
-      end
+      table.insert(normalized, line)
     end
   end
 
@@ -538,29 +525,6 @@ local function stylize_markdown_buffer(bufnr, contents, opts)
 
   vim.wo[0].conceallevel = config.options.conceallevel
   vim.wo[0].concealcursor = config.options.concealcursor
-
-  -- Add left padding to all lines in the buffer
-  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-  for i, line in ipairs(lines) do
-    lines[i] = " " .. line
-  end
-  vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
-
-  if #highlight_lines > 0 then
-    vim.schedule(function()
-      for _, h in ipairs(highlight_lines) do
-        local text = lines[h.line + 1] or ""
-        -- color the entire line; remove hl_eol if you prefer exact width via end_col
-        vim.api.nvim_buf_set_extmark(bufnr, vim.api.nvim_create_namespace("markdown_callout_titles"), h.line, 0, {
-          hl_group = h.hl,
-          hl_eol = true,
-          end_col = #text,
-          hl_mode = "combine",
-          priority = 200,
-        })
-      end
-    end)
-  end
 end
 
 --keyboard_event is true when the eagle window was invoked using the keyboard and not the mouse
@@ -588,34 +552,32 @@ function M.create_eagle_win(keyboard_event)
     }
 
     for i, d in ipairs(M.diagnostic_messages) do
-      local title = severity_title[d.severity]
-
-      table.insert(messages, ">[!" .. title .. "]") -- title line
-      -- table.insert(messages, ">") -- blank line inside quote
-
-      -- message body (may span multiple lines)
-      local message_parts = vim.split(d.message, "\n", { trimempty = false })
-      for msg_index, part in ipairs(message_parts) do
-        if msg_index == #message_parts then
-          -- This is the last line, append meta info if it exists
-          local meta = nil
-
-          if d.source and d.code then
-            -- e.g. "Lua Diagnostic (undefined-global)"
-            meta = string.format(" — *%s (%s)*", d.source, d.code)
-          elseif d.source then
-            meta = string.format(" — *%s*", d.source)
-          elseif d.code then
-            -- rare case: a server fills only the code field
-            meta = string.format(" — *%s*", d.code)
-          end
-
-          if meta then
-            part = part .. meta
-          end
-        end
-        table.insert(messages, part) -- quoted line
+      local meta = nil
+      if d.source and d.code then
+        -- e.g. "Lua Diagnostic (undefined-global)"
+        meta = string.format("%s(%s)", d.source, d.code)
+      elseif d.source then
+        meta = string.format("%s", d.source)
+      elseif d.code then
+        -- rare case: a server fills only the code field
+        meta = string.format("%s", d.code)
       end
+
+      local title = severity_title[d.severity]
+      if meta then
+        title = title .. " — " .. meta
+      end
+
+      table.insert(messages, ">[!" .. title .. "]")
+
+      local formatter = config.options.source_formatters[d.source]
+      local message = formatter and formatter(d) or d.message
+
+      local message_parts = vim.split(message, "\n", { trimempty = false })
+      for _, part in ipairs(message_parts) do
+        table.insert(messages, part)
+      end
+
       local href = d.user_data
         and d.user_data.lsp
         and d.user_data.lsp.codeDescription
@@ -625,9 +587,8 @@ function M.create_eagle_win(keyboard_event)
         table.insert(messages, "[More info](" .. href .. ")")
       end
 
-      -- add a blank line after each call-out except the last one
       if i < #M.diagnostic_messages then
-        table.insert(messages, " \n")
+        table.insert(messages, "___") -- use this instead of "---" to avoid conflict with heading setext
       end
     end
   end
@@ -639,7 +600,9 @@ function M.create_eagle_win(keyboard_event)
         table.insert(messages, "")
       end
       for _, md_line in ipairs(M.lsp_info) do
-        table.insert(messages, md_line)
+        if md_line ~= "" then
+          table.insert(messages, md_line)
+        end
       end
     end
   end
@@ -738,11 +701,12 @@ function M.create_eagle_win(keyboard_event)
     max_line_width = math.max(max_line_width, line_width)
   end
 
-  -- Calculate the window height based on the number of lines in the buffer
-  local height = math.min(
+  local buf_height = math.min(
     vim.api.nvim_buf_line_count(eagle_buf),
     math.floor(vim.o.lines / config.options.max_height_factor)
   ) + config.options.height_offset
+
+  local height = math.max(buf_height, 1) -- ensure height is at least 1, since config.options.height_offset can be negative
 
   -- need + 1 for hyperlinks (shift + click)
   local width =
