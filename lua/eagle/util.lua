@@ -511,7 +511,7 @@ local function stylize_markdown_buffer(bufnr, contents, opts)
 
   local render_config = type(config.options.improved_markdown) == "boolean" and {} or config.options.improved_markdown
   for _, line in ipairs(contents) do
-    if line == "---" and render_config.replace_dashes then
+    if line == "___" and render_config.replace_dashes then
       table.insert(normalized, string.rep("─", width))
     else
       table.insert(normalized, line)
@@ -584,11 +584,11 @@ function M.create_eagle_win(keyboard_event)
         and d.user_data.lsp.codeDescription.href
 
       if href then
-        table.insert(messages, "[More info](" .. href .. ")")
+        table.insert(messages, "[View documents](" .. href .. ")")
       end
 
       if i < #M.diagnostic_messages then
-        table.insert(messages, "___") -- use this instead of "---" to avoid conflict with heading setext
+        table.insert(messages, "___")
       end
     end
   end
@@ -600,7 +600,9 @@ function M.create_eagle_win(keyboard_event)
         table.insert(messages, "")
       end
       for _, md_line in ipairs(M.lsp_info) do
-        if md_line ~= "" then
+        if md_line == "---" then
+          table.insert(messages, "___")
+        elseif md_line ~= "" then
           table.insert(messages, md_line)
         end
       end
@@ -630,7 +632,6 @@ function M.create_eagle_win(keyboard_event)
   end
 
   -- Adjust the order and insert '___' appropriately
-  -- Use this instead of "---" to avoid conflict with heading setext
   if config.options.order == 1 then
     add_diagnostics()
     if has_diagnostics and has_lsp_info then
