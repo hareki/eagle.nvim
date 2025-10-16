@@ -703,12 +703,15 @@ function M.create_eagle_win(keyboard_event)
     max_line_width = math.max(max_line_width, line_width)
   end
 
-  local buf_height = math.min(
-    vim.api.nvim_buf_line_count(eagle_buf),
-    math.floor(vim.o.lines / config.options.max_height_factor)
-  ) + config.options.height_offset
+  local buf_height =
+    math.min(vim.api.nvim_buf_line_count(eagle_buf), math.floor(vim.o.lines / config.options.max_height_factor))
 
-  local height = math.max(buf_height, 1) -- ensure height is at least 1, since config.options.height_offset can be negative
+  -- Subtract 1 for the lsp info code fence (```)
+  if has_lsp_info then
+    buf_height = buf_height - 1
+  end
+
+  local height = math.max(buf_height, 1) -- ensure height is at least 1
 
   -- need + 1 for hyperlinks (shift + click)
   local width =
