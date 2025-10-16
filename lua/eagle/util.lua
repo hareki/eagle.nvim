@@ -522,9 +522,6 @@ local function stylize_markdown_buffer(bufnr, contents, opts)
   vim.bo[bufnr].filetype = "markdown"
   vim.treesitter.start(bufnr)
   vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, normalized)
-
-  vim.wo[0].conceallevel = config.options.conceallevel
-  vim.wo[0].concealcursor = config.options.concealcursor
 end
 
 --keyboard_event is true when the eagle window was invoked using the keyboard and not the mouse
@@ -739,6 +736,11 @@ function M.create_eagle_win(keyboard_event)
     border = config.options.border,
     focusable = focusable,
   })
+
+  if config.options.improved_markdown then
+    vim.api.nvim_set_option_value("conceallevel", config.options.conceallevel, { win = M.eagle_win })
+    vim.api.nvim_set_option_value("concealcursor", config.options.concealcursor, { win = M.eagle_win })
+  end
 
   if config.options.on_open then
     config.options.on_open(M.eagle_win, eagle_buf)
