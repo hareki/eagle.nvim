@@ -33,6 +33,36 @@ end
 
 -- format the lines of eagle_buf, in order to fit vim.o.columns / config.options.max_width_factor
 -- for the case where an href link is splitted, I'm open to discussions on how to handle it
+local function contains_link(line)
+  if not line then
+    return false
+  end
+
+  if line:match("%b[]%b()") then
+    return true
+  end
+
+  if line:match("https?://%S+") then
+    return true
+  end
+
+  if line:match("<https?://[^>%s]+>") then
+    return true
+  end
+
+  return false
+end
+
+local function sanitize_markdown_line(line)
+  if not line then
+    return line
+  end
+
+  local sanitized = line
+  sanitized = sanitized:gsub("\\([()%[%]{}%.%+%-%_%*`#!<>])", "%1")
+  return sanitized
+end
+
 local function format_lines(max_width)
   if not eagle_buf then
     -- Don't call format_lines if eagle_buf has not been initialized
@@ -67,6 +97,8 @@ local function format_lines(max_width)
         -- If it's a markdown separator, truncate the line at max_width
         -- Notice we multiply max_width by 3, because this character takes up three bytes
         line = string.sub(line, 1, max_width * 3)
+      elseif contains_link(line) then
+        -- Keep markdown links intact so builtins like `gx` still work
       else
         -- Find the last space character within the maximum line width
         local space_index = max_width
@@ -529,7 +561,24 @@ end
 function M.create_eagle_win(keyboard_event)
   local messages = {}
   local has_diagnostics = #M.diagnostic_messages > 0
-  local has_lsp_info = config.options.show_lsp_info and #M.lsp_info > 0
+
+  -- Check if M.lsp_info has any non-empty, meaningful content
+  local has_lsp_info = false
+  local lsp_has_codefence = false
+  if config.options.show_lsp_info and #M.lsp_info > 0 then
+    for _, md_line in ipairs(M.lsp_info) do
+      if md_line ~= "" and md_line ~= "---" then
+        has_lsp_info = true
+        break
+      end
+    end
+    for _, md_line in ipairs(M.lsp_info) do
+      if md_line:match("^```") then
+        lsp_has_codefence = true
+        break
+      end
+    end
+  end
 
   local function add_diagnostics()
     if not has_diagnostics then
@@ -572,7 +621,7 @@ function M.create_eagle_win(keyboard_event)
 
       local message_parts = vim.split(message, "\n", { trimempty = false })
       for _, part in ipairs(message_parts) do
-        table.insert(messages, part)
+        table.insert(messages, sanitize_markdown_line(part))
       end
 
       local href = d.user_data
@@ -596,11 +645,16 @@ function M.create_eagle_win(keyboard_event)
         table.insert(messages, "# LSP Info")
         table.insert(messages, "")
       end
+      local in_code_block = false
       for _, md_line in ipairs(M.lsp_info) do
-        if md_line == "---" then
+        if md_line:match("^```") then
+          in_code_block = not in_code_block
+          table.insert(messages, md_line)
+        elseif md_line == "---" then
           table.insert(messages, "___")
         elseif md_line ~= "" then
-          table.insert(messages, md_line)
+          local line = in_code_block and md_line or sanitize_markdown_line(md_line)
+          table.insert(messages, line)
         end
       end
     end
@@ -687,7 +741,8 @@ function M.create_eagle_win(keyboard_event)
   end
 
   -- format long lines of the buffer
-  format_lines(math.floor(vim.o.columns / config.options.max_width_factor))
+  local max_content_width = math.floor(vim.o.columns / config.options.max_width_factor)
+  format_lines(max_content_width)
 
   vim.api.nvim_set_option_value("modifiable", false, { buf = eagle_buf })
   vim.api.nvim_set_option_value("readonly", true, { buf = eagle_buf })
@@ -704,15 +759,23 @@ function M.create_eagle_win(keyboard_event)
     math.min(vim.api.nvim_buf_line_count(eagle_buf), math.floor(vim.o.lines / config.options.max_height_factor))
 
   -- Subtract 1 for the lsp info code fence (```)
-  if has_lsp_info then
+  if has_lsp_info and lsp_has_codefence then
     buf_height = buf_height - 1
   end
 
   local height = math.max(buf_height, 1) -- ensure height is at least 1
 
   -- need + 1 for hyperlinks (shift + click)
-  local width =
-    math.max(max_line_width + config.options.scrollbar_offset + 1, vim.fn.strdisplaywidth(config.options.title))
+  local max_allowed_width = max_content_width + config.options.scrollbar_offset + 2
+  local width = math.max(
+    math.min(max_line_width + config.options.scrollbar_offset + 1, max_allowed_width),
+    vim.fn.strdisplaywidth(config.options.title)
+  )
+
+  if max_line_width > max_allowed_width then
+    -- allow focusing the float so users can sidescroll to read long links
+    focusable = true
+  end
 
   vim.api.nvim_set_hl(0, "TitleColor", { fg = config.options.title_color })
   vim.api.nvim_set_hl(0, "FloatBorder", { fg = config.options.border_color })
@@ -736,6 +799,8 @@ function M.create_eagle_win(keyboard_event)
     border = config.options.border,
     focusable = focusable,
   })
+
+  vim.api.nvim_set_option_value("wrap", false, { win = M.eagle_win })
 
   if config.options.improved_markdown then
     vim.api.nvim_set_option_value("conceallevel", config.options.conceallevel, { win = M.eagle_win })
