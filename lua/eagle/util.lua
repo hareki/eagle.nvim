@@ -501,16 +501,22 @@ function M.load_diagnostics(keyboard_event)
   if diagnostics and #diagnostics > 0 then
     for _, diagnostic in ipairs(diagnostics) do
       local cursor_in_v_bounds, cursor_in_h_bounds
+      local end_lnum = diagnostic.end_lnum or diagnostic.lnum
+      local end_col = diagnostic.end_col
+      if not end_col or (diagnostic.lnum == end_lnum and end_col <= diagnostic.col) then
+        -- fallback for zero-width diagnostics that still place an underline
+        end_col = diagnostic.col + 1
+      end
 
       -- check if the mouse is within the vertical bounds of the diagnostic (single-line or otherwise)
-      cursor_in_v_bounds = (diagnostic.lnum <= pos.row) and (pos.row <= diagnostic.end_lnum)
+      cursor_in_v_bounds = (diagnostic.lnum <= pos.row) and (pos.row <= end_lnum)
 
       if cursor_in_v_bounds then
-        if diagnostic.lnum == diagnostic.end_lnum then
+        if diagnostic.lnum == end_lnum then
           -- if its a single-line diagnostic
 
           -- check if the mouse is within the horizontal bounds of the diagnostic
-          cursor_in_h_bounds = (diagnostic.col <= pos.col) and (pos.col < diagnostic.end_col)
+          cursor_in_h_bounds = (diagnostic.col <= pos.col) and (pos.col < end_col)
         else
           -- if its a multi-line diagnostic (nested)
 
