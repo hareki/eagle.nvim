@@ -99,7 +99,8 @@ function M.setup(opts)
 
   if config.options.keyboard_mode then
     -- Expose the function so it can be called from a keybinding
-    vim.api.nvim_create_user_command('EagleWin', keyboard_handler.render_keyboard_mode, {})
+    vim.api.nvim_create_user_command("EagleWin", keyboard_handler.render_keyboard_mode, {})
+    vim.api.nvim_create_user_command("EagleWinLineDiagnostic", keyboard_handler.render_line_diagnostics, {})
   end
 
   vim.api.nvim_create_autocmd("CursorMoved", {
