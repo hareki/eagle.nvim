@@ -591,6 +591,21 @@ function M.create_eagle_win(keyboard_event)
       return
     end
 
+    local filtered_diagnostic_messages = {}
+    if config.options.diagnostic_filter then
+      for _, d in ipairs(M.diagnostic_messages) do
+        if config.options.diagnostic_filter(d) then
+          table.insert(filtered_diagnostic_messages, d)
+        end
+      end
+    else
+      filtered_diagnostic_messages = M.diagnostic_messages
+    end
+
+    if #filtered_diagnostic_messages == 0 then
+      return
+    end
+
     if config.options.show_headers then
       table.insert(messages, "# Diagnostics")
       table.insert(messages, "")
@@ -603,7 +618,7 @@ function M.create_eagle_win(keyboard_event)
       [vim.diagnostic.severity.HINT] = "HINT",
     }
 
-    for i, d in ipairs(M.diagnostic_messages) do
+    for i, d in ipairs(filtered_diagnostic_messages) do
       local meta = nil
       if d.source and d.code then
         -- e.g. "Lua Diagnostic (undefined-global)"
@@ -639,7 +654,7 @@ function M.create_eagle_win(keyboard_event)
         table.insert(messages, "[View documents](" .. href .. ")")
       end
 
-      if i < #M.diagnostic_messages then
+      if i < #filtered_diagnostic_messages then
         table.insert(messages, "___")
       end
     end

@@ -26,6 +26,11 @@ local defaults = {
   ---@alias DiagnosticFormatter fun(diagnostic: vim.diagnostic.Diagnostic): string
   ---@type table<string, DiagnosticFormatter>
   source_formatters = {},
+  -- optional filter function for diagnostics
+  -- if provided, each diagnostic will be passed to this function
+  -- only diagnostics that return true will be displayed in the eagle window
+  ---@type fun(diagnostic: vim.Diagnostic): boolean | nil
+  diagnostic_filter = nil,
   -- callback when the eagle window is opened
   on_open = nil,
 
