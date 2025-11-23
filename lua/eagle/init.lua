@@ -31,14 +31,6 @@ function M.setup(opts)
     config.options.detect_idle_timer = 50
   end
 
-  if config.options.max_width_factor < 1.1 or config.options.max_width_factor > 5.0 then
-    config.options.max_width_factor = 2
-  end
-
-  if config.options.max_height_factor < 2.5 or config.options.max_height_factor > 5.0 then
-    config.options.max_height_factor = 2.5
-  end
-
   if config.options.mouse_mode then
     local append_keymap = require("eagle.keymap")
 

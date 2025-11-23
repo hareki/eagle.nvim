@@ -762,7 +762,7 @@ function M.create_eagle_win(keyboard_event)
   end
 
   -- format long lines of the buffer
-  local max_content_width = math.floor(vim.o.columns / config.options.max_width_factor)
+  local max_content_width = config.options.get_max_width()
   format_lines(max_content_width)
 
   vim.api.nvim_set_option_value("modifiable", false, { buf = eagle_buf })
@@ -777,7 +777,7 @@ function M.create_eagle_win(keyboard_event)
   end
 
   local buf_height =
-    math.min(vim.api.nvim_buf_line_count(eagle_buf), math.floor(vim.o.lines / config.options.max_height_factor))
+    math.min(vim.api.nvim_buf_line_count(eagle_buf), config.options.get_max_height())
 
   -- Subtract 1 for the lsp info code fence (```)
   if has_lsp_info and lsp_has_codefence then

@@ -63,15 +63,15 @@ local defaults = {
   --you don't need this option.
   scrollbar_offset = 0,
 
-  --limit the width of the eagle window to the floor of vim.o.columns / max_width_factor
-  --it should be any float number in the range [1.1, 5.0]
-  --it falls back to 2.5 if you override outside the valid range
-  max_width_factor = 2,
+  -- Function to determine the maximum width of the eagle window
+  get_max_width = function()
+    return math.floor(vim.o.columns / 2)
+  end,
 
-  --limit the height of the eagle window to the floor of vim.o.lines / max_height_factor
-  --it should be any float number in the range [2.5, 5.0]
-  --it falls back to 2.5 if you override outside the valid range
-  max_height_factor = 2.5,
+  -- Function to determine the maximum height of the eagle window
+  get_max_height = function()
+    return math.floor(vim.o.lines / 2.5)
+  end,
 
   --the delay between the mouse position arriving at a diagnostic
   --and the floating window opening (in milliseconds)
