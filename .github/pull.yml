@@ -1,5 +1,0 @@
-version: '1'
-rules:
-  - base: main
-    upstream: soulis-1256:main
-    mergeMethod: merge
