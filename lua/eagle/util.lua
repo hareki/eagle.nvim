@@ -409,7 +409,7 @@ local function check_lsp_support()
 
   -- check if any of the relevant clients support textDocument/hover
   for _, client in ipairs(relevant_clients) do
-    if client.supports_method("textDocument/hover") then
+    if client:supports_method("textDocument/hover") then
       if config.options.logging then
         print("Found LSP client supporting textDocument/hover: " .. client.name)
       end
@@ -776,8 +776,7 @@ function M.create_eagle_win(keyboard_event)
     max_line_width = math.max(max_line_width, line_width)
   end
 
-  local buf_height =
-    math.min(vim.api.nvim_buf_line_count(eagle_buf), config.options.get_max_height())
+  local buf_height = math.min(vim.api.nvim_buf_line_count(eagle_buf), config.options.get_max_height())
 
   -- Subtract 1 for the lsp info code fence (```)
   if has_lsp_info and lsp_has_codefence then
