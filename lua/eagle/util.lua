@@ -32,7 +32,7 @@ function M.sort_buf_diagnostics()
 end
 
 -- format the lines of eagle_buf, in order to fit vim.o.columns / config.options.max_width_factor
--- for the case where an href link is splitted, I'm open to discussions on how to handle it
+-- for the case where an href link is split, I'm open to discussions on how to handle it
 local function contains_link(line)
   if not line then
     return false
@@ -142,7 +142,7 @@ local function format_lines(max_width)
     vim.schedule(function()
       for _, h in ipairs(highlight_lines) do
         local ns = vim.api.nvim_create_namespace("markdown_callout_titles")
-        vim.api.nvim_buf_add_highlight(eagle_buf, ns, h.hl, h.line, 0, -1)
+        vim.hl.range(eagle_buf, ns, h.hl, { h.line, 0 }, { h.line, -1 })
       end
     end)
   end
@@ -186,16 +186,18 @@ function M.debug_lsp_clients(opts)
     add("\n## Basic Information")
     add("• Name: " .. (client.name or "unnamed"))
     add("• ID: " .. client.id)
-    add("• Status: " .. (client.is_stopped and client.is_stopped() and "Stopped" or "Running"))
+    add("• Status: " .. (client:is_stopped() and "Stopped" or "Running"))
 
     -- Root directory
     if client.config and client.config.root_dir then
       add("• Root directory: " .. tostring(client.config.root_dir))
     end
 
-    -- Filetypes
-    if client.config and client.config.filetypes then
-      add("• Supported filetypes: " .. vim.inspect(client.config.filetypes))
+    -- Filetypes (resolved from vim.lsp.config registry; ClientConfig no longer carries them)
+    local registered_cfg = vim.lsp.config[client.name]
+    local filetypes = registered_cfg and registered_cfg.filetypes
+    if filetypes then
+      add("• Supported filetypes: " .. vim.inspect(filetypes))
     else
       add("• Supported filetypes: none specified")
     end
@@ -243,7 +245,7 @@ function M.debug_lsp_clients(opts)
     }
 
     for _, method in ipairs(common_methods) do
-      add("• " .. method .. ": " .. tostring(client.supports_method(method)))
+      add("• " .. method .. ": " .. tostring(client:supports_method(method)))
     end
 
     -- Server capabilities (detailed info)
@@ -335,7 +337,7 @@ function M.debug_lsp_clients(opts)
         add("• Text Document Sync: " .. (sync_kind_text[sync_kind] or "Unknown"))
 
         if type(client.server_capabilities.textDocumentSync) == "table" then
-          local sync = client.server_capabilities.textDocumentSync
+          local sync = client.server_capabilities.textDocumentSync --[[@as table]]
           if sync.willSave then
             add("  - Will Save: true")
           end
@@ -400,9 +402,12 @@ local function check_lsp_support()
   local clients = vim.lsp.get_clients()
 
   -- filter the clients based on the filetype of the current buffer
+  -- (filetypes were removed from vim.lsp.ClientConfig; resolve via the registered vim.lsp.config)
   local relevant_clients = {}
   for _, client in ipairs(clients) do
-    if client.config.filetypes and vim.tbl_contains(client.config.filetypes, filetype) then
+    local registered_cfg = vim.lsp.config[client.name]
+    local filetypes = registered_cfg and registered_cfg.filetypes
+    if filetypes and vim.tbl_contains(filetypes, filetype) then
       table.insert(relevant_clients, client)
     end
   end
@@ -757,8 +762,11 @@ function M.create_eagle_win(keyboard_event)
   if config.options.improved_markdown then
     stylize_markdown_buffer(eagle_buf, messages, {})
   else
-    --old way, not recommended
-    vim.lsp.util.stylize_markdown(eagle_buf, messages, {})
+    -- basic markdown rendering (replaces deprecated vim.lsp.util.stylize_markdown)
+    local lines = vim.split(table.concat(messages, "\n"), "\n", { trimempty = true })
+    vim.api.nvim_buf_set_lines(eagle_buf, 0, -1, false, lines)
+    vim.bo[eagle_buf].filetype = "markdown"
+    vim.treesitter.start(eagle_buf)
   end
 
   -- format long lines of the buffer
