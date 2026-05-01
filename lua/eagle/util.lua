@@ -31,28 +31,6 @@ function M.sort_buf_diagnostics()
   end)
 end
 
--- format the lines of eagle_buf, in order to fit vim.o.columns / config.options.max_width_factor
--- for the case where an href link is split, I'm open to discussions on how to handle it
-local function contains_link(line)
-  if not line then
-    return false
-  end
-
-  if line:match("%b[]%b()") then
-    return true
-  end
-
-  if line:match("https?://%S+") then
-    return true
-  end
-
-  if line:match("<https?://[^>%s]+>") then
-    return true
-  end
-
-  return false
-end
-
 local function sanitize_markdown_line(line)
   if not line then
     return line
@@ -61,91 +39,6 @@ local function sanitize_markdown_line(line)
   local sanitized = line
   sanitized = sanitized:gsub("\\([()%[%]{}%.%+%-%_%*`#!<>])", "%1")
   return sanitized
-end
-
-local function format_lines(max_width)
-  if not eagle_buf then
-    -- Don't call format_lines if eagle_buf has not been initialized
-    return
-  end
-
-  local highlight_lines = {}
-  local render_config = type(config.options.improved_markdown) == "boolean" and {} or config.options.improved_markdown
-
-  -- Iterate over the lines in the buffer
-  local i = 0
-  while i < vim.api.nvim_buf_line_count(eagle_buf) do
-    -- Get the current line
-    local line = vim.api.nvim_buf_get_lines(eagle_buf, i, i + 1, false)[1]
-
-    -- Handle severity callouts when improved_markdown is enabled
-    if config.options.improved_markdown then
-      local severity, meta = line:match("^%s*>%[%!(%u+)%s*—%s*(.+)%]")
-      local severity_renderer = render_config.severity_renderer
-      if severity and meta and severity_renderer and severity_renderer[severity] then
-        local render = severity_renderer[severity]
-        table.insert(highlight_lines, { line = i, hl = render.hl })
-        line = render.icon .. meta
-        vim.api.nvim_buf_set_lines(eagle_buf, i, i + 1, false, { line })
-      end
-    end
-
-    -- If the line is too long
-    if vim.fn.strdisplaywidth(line) > max_width then
-      -- Check if the line is a markdown separator (contains only "─")
-      if string.match(line, "^[─]+$") then
-        -- If it's a markdown separator, truncate the line at max_width
-        -- Notice we multiply max_width by 3, because this character takes up three bytes
-        line = string.sub(line, 1, max_width * 3)
-      elseif contains_link(line) then
-        -- Keep markdown links intact so builtins like `gx` still work
-      else
-        -- Find the last space character within the maximum line width
-        local space_index = max_width
-        while space_index > 0 and string.sub(line, space_index, space_index) ~= " " do
-          space_index = space_index - 1
-        end
-
-        -- If no space character was found within max_width, just split at max_width
-        if space_index == 0 then
-          space_index = max_width
-        end
-
-        -- Split the line into two parts: the part that fits, and the remainder
-        local part1 = string.sub(line, 1, space_index)
-        local part2 = string.sub(line, space_index + 1)
-
-        -- Replace the current line with the part that fits
-        line = part1
-
-        -- Insert the remainder as a new line after the current line
-        vim.api.nvim_buf_set_lines(eagle_buf, i + 1, i + 1, false, { part2 })
-      end
-    end
-
-    -- Replace the current line with the modified version
-    vim.api.nvim_buf_set_lines(eagle_buf, i, i + 1, false, { line })
-
-    -- Move to the next line
-    i = i + 1
-  end
-
-  -- Add left padding to all lines in the buffer
-  local lines = vim.api.nvim_buf_get_lines(eagle_buf, 0, -1, false)
-  for index, line in ipairs(lines) do
-    lines[index] = " " .. line
-  end
-  vim.api.nvim_buf_set_lines(eagle_buf, 0, -1, false, lines)
-
-  -- Apply highlight lines if any were collected
-  if #highlight_lines > 0 then
-    vim.schedule(function()
-      for _, h in ipairs(highlight_lines) do
-        local ns = vim.api.nvim_create_namespace("markdown_callout_titles")
-        vim.hl.range(eagle_buf, ns, h.hl, { h.line, 0 }, { h.line, -1 })
-      end
-    end)
-  end
 end
 
 function M.debug_lsp_clients(opts)
@@ -544,29 +437,6 @@ function M.load_diagnostics(keyboard_event)
   return true
 end
 
-local function stylize_markdown_buffer(bufnr, contents, opts)
-  opts = opts or {}
-  contents = vim.split(table.concat(contents, "\n"), "\n", { trimempty = true })
-
-  -- Set default width if not provided
-  local width = opts.width or vim.api.nvim_win_get_width(0)
-  local normalized = {}
-
-  local render_config = type(config.options.improved_markdown) == "boolean" and {} or config.options.improved_markdown
-  for _, line in ipairs(contents) do
-    if line == "___" and render_config.replace_dashes then
-      table.insert(normalized, string.rep("─", width))
-    else
-      table.insert(normalized, line)
-    end
-  end
-
-  -- Set up the buffer for markdown syntax
-  vim.bo[bufnr].filetype = "markdown"
-  vim.treesitter.start(bufnr)
-  vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, normalized)
-end
-
 --keyboard_event is true when the eagle window was invoked using the keyboard and not the mouse
 --useful for hybrid scenario (keyboard + mouse enabled at the same time)
 function M.create_eagle_win(keyboard_event)
@@ -751,59 +621,98 @@ function M.create_eagle_win(keyboard_event)
     end
   end
 
+  -- Apply severity callout transformation up-front so width/height are computed
+  -- against what's actually rendered (icon + meta), not the ">[!ERROR ...]" source.
+  local highlight_lines = {}
+  local render_config = type(config.options.improved_markdown) == "boolean" and {} or config.options.improved_markdown
+  if config.options.improved_markdown then
+    for idx, msg in ipairs(messages) do
+      local severity, meta = msg:match("^%s*>%[%!(%u+)%s*—%s*(.+)%]")
+      local severity_renderer = render_config.severity_renderer
+      if severity and meta and severity_renderer and severity_renderer[severity] then
+        local render = severity_renderer[severity]
+        messages[idx] = render.icon .. meta
+        table.insert(highlight_lines, { line = idx - 1, hl = render.hl })
+      end
+    end
+  end
+
+  -- Determine max content width. Separator placeholders ("___") are excluded since
+  -- they will be expanded to fill the window width once that's known.
+  local replace_separators = config.options.improved_markdown and render_config.replace_dashes
+  local max_line_width = 0
+  for _, msg in ipairs(messages) do
+    if not (msg == "___" and replace_separators) then
+      max_line_width = math.max(max_line_width, vim.fn.strdisplaywidth(msg))
+    end
+  end
+
+  -- need + 1 for hyperlinks (shift + click); + 1 more for the leading-space pad
+  local max_content_width = config.options.get_max_width()
+  local max_allowed_width = max_content_width + config.options.scrollbar_offset + 2
+  local width = math.max(
+    math.min(max_line_width + config.options.scrollbar_offset + 2, max_allowed_width),
+    vim.fn.strdisplaywidth(config.options.title)
+  )
+
+  -- Separator spans the visible content area: window width minus leading space
+  -- and the scrollbar margin reserved on the right.
+  local separator_width = math.max(1, width - 1 - config.options.scrollbar_offset)
+
+  -- Build final buffer lines: replace separator placeholders, prepend leading-space pad.
+  local final_lines = {}
+  for _, msg in ipairs(messages) do
+    if msg == "___" and replace_separators then
+      table.insert(final_lines, " " .. string.rep("─", separator_width))
+    else
+      table.insert(final_lines, " " .. msg)
+    end
+  end
+
   -- create a buffer with buflisted = false and scratch = true
   if eagle_buf then
     vim.api.nvim_buf_delete(eagle_buf, {})
   end
   eagle_buf = vim.api.nvim_create_buf(false, true)
 
-  -- this "stylizes" the markdown messages (diagnostics + lsp info)
-  -- and attaches them to the eagle_buf
-  if config.options.improved_markdown then
-    stylize_markdown_buffer(eagle_buf, messages, {})
-  else
-    -- basic markdown rendering (replaces deprecated vim.lsp.util.stylize_markdown)
-    local lines = vim.split(table.concat(messages, "\n"), "\n", { trimempty = true })
-    vim.api.nvim_buf_set_lines(eagle_buf, 0, -1, false, lines)
-    vim.bo[eagle_buf].filetype = "markdown"
-    vim.treesitter.start(eagle_buf)
-  end
+  vim.bo[eagle_buf].filetype = "markdown"
+  vim.treesitter.start(eagle_buf)
+  vim.api.nvim_buf_set_lines(eagle_buf, 0, -1, false, final_lines)
 
-  -- format long lines of the buffer
-  local max_content_width = config.options.get_max_width()
-  format_lines(max_content_width)
+  -- Apply severity callout highlights (deferred so treesitter doesn't override them)
+  if #highlight_lines > 0 then
+    vim.schedule(function()
+      local ns = vim.api.nvim_create_namespace("markdown_callout_titles")
+      for _, h in ipairs(highlight_lines) do
+        vim.hl.range(eagle_buf, ns, h.hl, { h.line, 0 }, { h.line, -1 })
+      end
+    end)
+  end
 
   vim.api.nvim_set_option_value("modifiable", false, { buf = eagle_buf })
   vim.api.nvim_set_option_value("readonly", true, { buf = eagle_buf })
 
-  -- Iterate over each line in the buffer to find the max width
-  local lines = vim.api.nvim_buf_get_lines(eagle_buf, 0, -1, false)
-  local max_line_width = 0
-  for _, line in ipairs(lines) do
-    local line_width = vim.fn.strdisplaywidth(line)
-    max_line_width = math.max(max_line_width, line_width)
+  -- Compute window height from the wrapped display row count of each line.
+  -- With breakindent enabled, continuations indent by 1 col to match the leading
+  -- space, so each wrapped row past the first holds (width - 1) cols of content.
+  local first_capacity = width
+  local cont_capacity = math.max(1, width - 1)
+  local total_rows = 0
+  for _, line in ipairs(final_lines) do
+    local lw = vim.fn.strdisplaywidth(line)
+    if lw <= first_capacity then
+      total_rows = total_rows + 1
+    else
+      total_rows = total_rows + 1 + math.ceil((lw - first_capacity) / cont_capacity)
+    end
   end
-
-  local buf_height = math.min(vim.api.nvim_buf_line_count(eagle_buf), config.options.get_max_height())
 
   -- Subtract 1 for the lsp info code fence (```)
   if has_lsp_info and lsp_has_codefence then
-    buf_height = buf_height - 1
+    total_rows = total_rows - 1
   end
 
-  local height = math.max(buf_height, 1) -- ensure height is at least 1
-
-  -- need + 1 for hyperlinks (shift + click)
-  local max_allowed_width = max_content_width + config.options.scrollbar_offset + 2
-  local width = math.max(
-    math.min(max_line_width + config.options.scrollbar_offset + 1, max_allowed_width),
-    vim.fn.strdisplaywidth(config.options.title)
-  )
-
-  if max_line_width > max_allowed_width then
-    -- allow focusing the float so users can sidescroll to read long links
-    focusable = true
-  end
+  local height = math.max(math.min(total_rows, config.options.get_max_height()), 1)
 
   vim.api.nvim_set_hl(0, "TitleColor", { fg = config.options.title_color })
   vim.api.nvim_set_hl(0, "FloatBorder", { fg = config.options.border_color })
@@ -828,7 +737,9 @@ function M.create_eagle_win(keyboard_event)
     focusable = focusable,
   })
 
-  vim.api.nvim_set_option_value("wrap", false, { win = M.eagle_win })
+  vim.api.nvim_set_option_value("wrap", true, { win = M.eagle_win })
+  vim.api.nvim_set_option_value("linebreak", true, { win = M.eagle_win })
+  vim.api.nvim_set_option_value("breakindent", true, { win = M.eagle_win })
 
   if config.options.improved_markdown then
     vim.api.nvim_set_option_value("conceallevel", config.options.conceallevel, { win = M.eagle_win })
