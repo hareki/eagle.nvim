@@ -86,10 +86,7 @@ function M.contains(screenrow, screencol)
   local left = pos[2] + 1
   local height = vim.api.nvim_win_get_height(state.win)
   local width = vim.api.nvim_win_get_width(state.win)
-  return screenrow >= top - 1
-    and screenrow <= top + height
-    and screencol >= left - 1
-    and screencol <= left + width
+  return screenrow >= top - 1 and screenrow <= top + height and screencol >= left - 1 and screencol <= left + width
 end
 
 ---Whether the float should open above the anchor, based on its screen row.

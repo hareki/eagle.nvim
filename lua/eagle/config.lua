@@ -1,120 +1,145 @@
 local M = {}
 
+---@class eagle.SeverityStyle
+---@field icon string Prefix shown before the callout title text.
+---@field hl string Highlight group applied to the whole title line.
+
+---@class eagle.MouseOpts
+---@field enabled boolean Enable mouse tracking. When false, eagle registers no
+---mouse side effects at all: no key observer, no timers, no mouse autocmds,
+---and vim.o.mousemoveevent is left untouched.
+---@field render_delay integer ms the mouse must rest on a spot before the float opens.
+---@field idle_delay integer ms without mouse movement before the mouse counts as idle.
+
+---@class eagle.KeyboardOpts
+---@field enabled boolean Register :EagleWin and :EagleWinLineDiagnostic.
+
+---@class eagle.RenderOpts
+---@field severity table<"ERROR"|"WARN"|"INFO"|"HINT", eagle.SeverityStyle>
+---@field expand_separators boolean Expand separators to full-width "─" rules.
+---@field unescape boolean Strip LSP-server backslash over-escaping outside code.
+---@field conceallevel integer Applied to the eagle window only.
+---@field concealcursor string Applied to the eagle window only.
+
+---@class eagle.WindowOpts
+---@field border string|string[] See :h nvim_open_win.
+---@field title string
+---@field title_pos "left"|"center"|"right"
+---@field row_offset integer Rows between the anchor and the float.
+---@field col_offset integer Columns the float is shifted left of the anchor.
+---@field scrollbar_offset integer Extra right-side columns for scrollbar plugins.
+---@field max_width fun(): integer Re-evaluated on every render.
+---@field max_height fun(): integer Re-evaluated on every render.
+
+---@class eagle.Config
+---@field mouse eagle.MouseOpts
+---@field keyboard eagle.KeyboardOpts
+---@field order 1|2|3|4 Section order of diagnostics (D) and LSP info (L).
+---Left of the slash is the layout when the float opens above the anchor,
+---right when below: 1. DL/DL  2. DL/LD  3. LD/LD  4. LD/DL
+---@field show_headers boolean Show the "# Diagnostics" / "# LSP Info" headers.
+---@field show_lsp_info boolean Include LSP hover contents in the float.
+---@field close_on_cmd boolean Close the float when entering the command line.
+---@field logging boolean Debug logging via vim.notify (check :messages).
+---@field diagnostic_filter (fun(d: vim.Diagnostic): boolean?)? Applied at
+---collection time; rejected diagnostics never influence whether the float opens.
+---@field source_formatters table<string, fun(d: vim.Diagnostic): string> Message
+---rewriters keyed by diagnostic.source; the returned string may be markdown.
+---@field on_open (fun(win: integer, buf: integer))? Runs after the float is created.
+---@field render eagle.RenderOpts
+---@field window eagle.WindowOpts
+
+---@type eagle.Config
 local defaults = {
-  -- whether to show the markdown headers (# Diagnostics and # LSP Info)
-  -- this is also controlled by the command :EagleWinToggleHeaders
-  show_headers = true,
-
-  -- the order of diagnostics (D) and lsp info (L)
-  -- the order can vary based on if the window is rendered on the
-  -- top half or bottom half of the screen (based on the mouse/cursor position in the view)
-  -- there are 4 options (left of the slash is the top render, right of the slash is the bottom render):
-  -- 1. DL/DL (the default, diagnostics have priority)
-  -- 2. DL/LD (lsp info is always the closest to the mouse/cursor)
-  -- 3. LD/LD (lsp info have priority)
-  -- 4. LD/DL (diagnostics is always the closest to the mouse/cursor)
+  mouse = {
+    enabled = true,
+    render_delay = 500,
+    idle_delay = 50,
+  },
+  keyboard = {
+    enabled = false,
+  },
   order = 1,
-
-  --see https://neovim.io/doc/user/options.html for both of these options
-  --redundant when <improved_markdown> is disabled
-  --it's recommended to not change these as it may cause some artifacts
-  concealcursor = "nv",
-  conceallevel = 1,
-
-  --added an improved way to stylize markdown that is visually identical to vim.lsp.buf.hover()
-  --disable if you encounter any issues
-  improved_markdown = true,
-
-  --mouse mode is the default mode for this plugin
-  --disable if you want pure keyboard mode
-  mouse_mode = true,
-
-  --keyboard mode disables mouse control
-  --set a custom keybind to use the plugin
-  --you can disable vim.o.mousemoveevent if you enable this option
-  --you can have both keyboard_mode and mouse_mode enabled at the same time
-  keyboard_mode = false,
-
-  --logging, runtime info
-  --enable if the plugin isn't working as expected
-  --and check with ':messages'
-  logging = false,
-
-  -- close the eagle window when you execute a command (pressing : on normal or visual mode)
-  -- this is to avoid weird things happening when the eagle window is in focus
-  -- set it to false if you want more control over the window
-  close_on_cmd = true,
-
-  --show lsp info (exact same contents as from vim.lsp.buf.hover()) in the eagle window
+  show_headers = true,
   show_lsp_info = true,
-
-  --Offset that handles possible scrollbar plugins
-  --by adding an offset column in the right side of the window.
-  --If you don't know what I'm talking about, then
-  --you don't need this option.
-  scrollbar_offset = 0,
-
-  --limit the width of the eagle window to the floor of vim.o.columns / max_width_factor
-  --it should be any float number in the range [1.1, 5.0]
-  --it falls back to 2.5 if you override outside the valid range
-  max_width_factor = 2,
-
-  --limit the height of the eagle window to the floor of vim.o.lines / max_height_factor
-  --it should be any float number in the range [2.5, 5.0]
-  --it falls back to 2.5 if you override outside the valid range
-  max_height_factor = 2.5,
-
-  --the delay between the mouse position arriving at a diagnostic
-  --and the floating window opening (in milliseconds)
-  --falls back to 500 if you override to something below 0
-  render_delay = 500,
-
-  --the timer before the mouse is considered idle (in milliseconds)
-  --it falls back to 50 if you override to something below 0
-  detect_idle_timer = 50,
-
-  --offsets that can move the window in any direction
-  --you can experiment with values and see what you like
-  window_row = 1,
-  window_col = 5,
-
-  --window border options, from the api docs
-  --"none": No border (default).
-  --"single": A single line box.
-  --"double": A double line box.
-  --"rounded": Like "single", but with rounded corners ("╭" etc.).
-  --"solid": Adds padding by a single whitespace cell.
-  --"shadow": A drop shadow effect by blending with the background.
-  border = "single",
-
-  -- the title of the window
-  title = "",
-
-  --the position of the title
-  --can be "left", "center" or "right"
-  title_pos = "center",
-
-  -- window title color
-  title_color = "#8AAAE5",
-
-  -- window border color
-  border_color = "#8AAAE5",
-
-  -- Header colors (for "# Diagnostics" and "# LSP Info" titles)
-  -- format is #RRGGBB
-  diagnostic_header_color = "",
-  lsp_info_header_color = "",
-  
-  -- Content colors (for the actual diagnostic messages and LSP documentation)
-  -- format is #RRGGBB
-  diagnostic_content_color = "",
-  lsp_info_content_color = "",
+  close_on_cmd = true,
+  logging = false,
+  diagnostic_filter = nil,
+  source_formatters = {},
+  on_open = nil,
+  render = {
+    severity = {
+      ERROR = { icon = "󰅚 ", hl = "DiagnosticError" },
+      WARN = { icon = "󰀪 ", hl = "DiagnosticWarn" },
+      INFO = { icon = "󰋽 ", hl = "DiagnosticInfo" },
+      HINT = { icon = "󰌶 ", hl = "DiagnosticHint" },
+    },
+    expand_separators = true,
+    unescape = true,
+    conceallevel = 3,
+    concealcursor = "nc",
+  },
+  window = {
+    border = "single",
+    title = "",
+    title_pos = "center",
+    row_offset = 1,
+    col_offset = 5,
+    scrollbar_offset = 0,
+    max_width = function()
+      return math.floor(vim.o.columns / 2)
+    end,
+    max_height = function()
+      return math.floor(vim.o.lines / 2.5)
+    end,
+  },
 }
 
-M.options = {}
+---@type eagle.Config
+M.options = vim.deepcopy(defaults)
 
+local function validate()
+  local o = M.options
+  vim.validate("mouse.enabled", o.mouse.enabled, "boolean")
+  vim.validate("mouse.render_delay", o.mouse.render_delay, "number")
+  vim.validate("mouse.idle_delay", o.mouse.idle_delay, "number")
+  vim.validate("keyboard.enabled", o.keyboard.enabled, "boolean")
+  vim.validate("order", o.order, function(v)
+    return v == 1 or v == 2 or v == 3 or v == 4
+  end, "1, 2, 3 or 4")
+  vim.validate("show_headers", o.show_headers, "boolean")
+  vim.validate("show_lsp_info", o.show_lsp_info, "boolean")
+  vim.validate("close_on_cmd", o.close_on_cmd, "boolean")
+  vim.validate("logging", o.logging, "boolean")
+  vim.validate("diagnostic_filter", o.diagnostic_filter, "callable", true)
+  vim.validate("source_formatters", o.source_formatters, "table")
+  vim.validate("on_open", o.on_open, "callable", true)
+  vim.validate("render.severity", o.render.severity, "table")
+  for name, style in pairs(o.render.severity) do
+    vim.validate("render.severity." .. name .. ".icon", style.icon, "string")
+    vim.validate("render.severity." .. name .. ".hl", style.hl, "string")
+  end
+  vim.validate("render.expand_separators", o.render.expand_separators, "boolean")
+  vim.validate("render.unescape", o.render.unescape, "boolean")
+  vim.validate("render.conceallevel", o.render.conceallevel, "number")
+  vim.validate("render.concealcursor", o.render.concealcursor, "string")
+  vim.validate("window.border", o.window.border, { "string", "table" })
+  vim.validate("window.title", o.window.title, "string")
+  vim.validate("window.title_pos", o.window.title_pos, "string")
+  vim.validate("window.row_offset", o.window.row_offset, "number")
+  vim.validate("window.col_offset", o.window.col_offset, "number")
+  vim.validate("window.scrollbar_offset", o.window.scrollbar_offset, "number")
+  vim.validate("window.max_width", o.window.max_width, "callable")
+  vim.validate("window.max_height", o.window.max_height, "callable")
+
+  o.mouse.render_delay = math.max(o.mouse.render_delay, 0)
+  o.mouse.idle_delay = math.max(o.mouse.idle_delay, 0)
+end
+
+---@param options eagle.Config|table|nil
 function M.setup(options)
-  M.options = vim.tbl_deep_extend("force", defaults, options or {})
+  M.options = vim.tbl_deep_extend("force", vim.deepcopy(defaults), options or {})
+  validate()
 end
 
 return M
