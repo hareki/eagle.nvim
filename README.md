@@ -1,249 +1,212 @@
 # 🦅 eagle.nvim
 
-[![Neovim](https://img.shields.io/badge/Neovim-0.10.2+-57A143?style=flat-square&logo=neovim&logoColor=white)](https://neovim.io)
-[![License](https://img.shields.io/github/license/soulis-1256/eagle.nvim?style=flat-square)](./LICENSE)
-[![GitHub stars](https://img.shields.io/github/stars/soulis-1256/eagle.nvim?style=flat-square)](https://github.com/soulis-1256/eagle.nvim/stargazers)
-[![Last Commit](https://img.shields.io/github/last-commit/soulis-1256/eagle.nvim?style=flat-square)](https://github.com/soulis-1256/eagle.nvim/commits/main)
+A Neovim plugin that shows diagnostics and LSP hover information in a floating window, following either the mouse or the keyboard cursor.
 
-A Neovim plugin that provides a floating window for diagnostics and LSP information.
-
-![showcase_eagle](https://github.com/soulis-1256/eagle.nvim/assets/118274635/ec28d139-0087-4e0d-a52b-c217231b846e)
-
-## Table of Contents
-
-- [Features](#features)
-- [Why eagle.nvim?](#why-eaglenvim)
-- [Requirements](#requirements)
-- [Installation](#installation)
-- [Configuration](#configuration)
-- [Usage](#usage)
-- [Troubleshooting](#troubleshooting)
-- [Contributing](#contributing)
-- [Support](#support)
-- [Acknowledgments](#acknowledgments)
+This is a heavily rewritten fork of [soulis-1256/eagle.nvim](https://github.com/soulis-1256/eagle.nvim). The config surface and internals are **not** compatible with upstream; see [Migrating from upstream](#migrating-from-upstream).
 
 ## Features
 
-- **Smart Mouse Tracking** — Detects when the mouse hovers over underlined code. Once idle (configurable delay), a floating window appears, mirroring the behavior of conventional GUI editors like VS Code.
-
-- **Comprehensive Diagnostics** — Displays all diagnostics (Errors, Warnings, Hints) under the current position. Multiple diagnostics at the same location are shown in a numbered list.
-
-- **LSP Integration** — Shows LSP hover information (same content as `vim.lsp.buf.hover()`).
-
-- **Intelligent Re-rendering** — The window only re-renders when the mouse encounters a "special" character (like `{}.?:`), staying open while hovering over the same variable/function/operator name.
-
-- **Keyboard Mode** — Opt-in keyboard control that can work alongside or independently of mouse control (eg. using the `<Tab>` key).
-
-- **Highly Customizable** — Extensive configuration options for appearance, timing, and behavior.
-
-## Why eagle.nvim?
-
-| Feature | Built-in `vim.diagnostic.open_float()` | Built-in `vim.lsp.buf.hover()` | eagle.nvim |
-|---------|:--------------------------------------:|:------------------------------:|:----------:|
-| Mouse tracking | ❌ | ❌ | ✅ |
-| Combined diagnostics + LSP | ❌ | ❌ | ✅ |
-| Smart rendering | ❌ | ❌ | ✅ |
-| Keyboard + Mouse cooperation | ❌ | ❌ | ✅ |
+- **Mouse mode**: hover underlined code and, after a configurable idle delay, a float appears, like conventional GUI editors. Tracking is fully event-driven (no polling timers), and `vim.o.mousemoveevent` is managed for you.
+- **Keyboard mode**: `:EagleWin` shows diagnostics + hover for the cursor position, `:EagleWinLineDiagnostic` shows every diagnostic on the current line.
+- **Callout-style diagnostics**: each diagnostic renders as a severity icon + `source(code)` title line (highlighted per severity) above its message, with `[View documents](…)` links when the server provides them.
+- **Real markdown rendering**: the float is a markdown buffer with treesitter highlighting, so fenced code blocks, links, and inline code render properly. Separators are emitted as thematic breaks (never setext underlines), optionally expanded to full-width rules.
+- **Correct by construction**: per-client `offset_encoding` for hover requests, multi-client aggregation, diagnostics resolved against the window under the mouse (not the focused window), wrap-aware and conceal-aware window sizing via `nvim_win_text_height`.
+- **Clean off-switch**: `mouse.enabled = false` registers zero mouse side effects; with both modes disabled, `setup()` registers nothing at all.
 
 ## Requirements
 
-- Neovim `API level 12` (tested on a version as old as `0.10.2`.
-- A configured LSP server to provide the LSP information. This is only a requirement if you need the feature. If you don't, make sure you set `show_lsp_info=false` so you save some cpu cycles (see more in [Configuration](#configuration)).
+- Neovim **0.11+** (developed and tested on 0.12).
+- An LSP server if you want hover info; set `show_lsp_info = false` otherwise.
+- A [Nerd Font](https://www.nerdfonts.com/) for the default severity icons (override `render.severity` for plain text).
 
 ## Installation
 
-<details>
-<summary>Using <a href="https://www.lazyvim.org/">LazyVim</a></summary>
+Using [lazy.nvim](https://github.com/folke/lazy.nvim):
 
-Create a file under `lua/plugins/eagle.lua`:
 ```lua
-return {
-    {
-        "soulis-1256/eagle.nvim",
-        config = function()
-            require("eagle").setup({
-                keyboard_mode = true,
-            })
-            vim.o.mousemoveevent = true
-            vim.keymap.set('n', '<Tab>', ':EagleWin<CR>', { noremap = true, silent = true })
-        end,
-    },
+{
+  "hareki/eagle.nvim",
+  opts = {},
 }
 ```
-</details>
 
-<details>
-<summary>Using <a href="https://github.com/folke/lazy.nvim">lazy.nvim</a></summary>
+Keyboard-only setup, lazy-loaded on its commands:
 
-**Basic setup:**
 ```lua
 {
-    "soulis-1256/eagle.nvim",
-    opts = {},
-    config = function(_, opts)
-        require("eagle").setup(opts)
-        vim.o.mousemoveevent = true -- Required for mouse mode
-    end,
-},
+  "hareki/eagle.nvim",
+  cmd = { "EagleWin", "EagleWinLineDiagnostic" },
+  opts = {
+    mouse = { enabled = false },
+    keyboard = { enabled = true },
+  },
+}
 ```
-
-**With keyboard mode enabled:**
-```lua
-{
-    "soulis-1256/eagle.nvim",
-    opts = {
-        keyboard_mode = true,
-    },
-    config = function(_, opts)
-        require("eagle").setup(opts)
-        vim.o.mousemoveevent = true
-        vim.keymap.set('n', '<Tab>', ':EagleWin<CR>', { noremap = true, silent = true })
-    end,
-},
-```
-
-**Alternative setup (if you encounter issues with `opts`):**
-```lua
-{ "soulis-1256/eagle.nvim" },
-```
-Then in your config:
-```lua
-require("eagle").setup({
-    -- your options here
-})
-vim.o.mousemoveevent = true
-```
-</details>
 
 ## Configuration
 
-All options can be passed to the `setup()` function. See [config.lua](./lua/eagle/config.lua) for documentation.
-
-### Default Options
+Defaults:
 
 ```lua
-{
-    show_headers=true,
-    order=1,
-    concealcursor="nv",
-    conceallevel=1,
-    improved_markdown=true,
-    mouse_mode=true,
-    keyboard_mode=false,
-    logging=false,
-    close_on_cmd=true,
-    show_lsp_info=true,
-    scrollbar_offset=0,
-    max_width_factor=2,
-    max_height_factor=2.5,
-    render_delay=500,
-    detect_idle_timer=50,
-    window_row=1,
-    window_col=5,
-    border="single",
-    title="",
-    title_pos="center",
-    title_color="#8AAAE5",
-    border_color="#8AAAE5",
-    diagnostic_header_color="",
-    lsp_info_header_color="",
-    diagnostic_content_color="",
-    lsp_info_content_color="",
-}
+require("eagle").setup({
+  mouse = {
+    -- Enable mouse tracking. Sets vim.o.mousemoveevent for you.
+    -- When false, eagle registers no mouse side effects at all.
+    enabled = true,
+    -- ms the mouse must rest on a spot before the float opens
+    render_delay = 500,
+    -- ms without movement before the mouse counts as idle
+    idle_delay = 50,
+  },
+  keyboard = {
+    -- Register :EagleWin and :EagleWinLineDiagnostic
+    enabled = false,
+  },
+
+  -- Section order of diagnostics (D) and LSP info (L). Left of the slash is
+  -- the layout when the float opens above the anchor, right when below:
+  -- 1. DL/DL   2. DL/LD   3. LD/LD   4. LD/DL
+  order = 1,
+
+  -- Show the "# Diagnostics" / "# LSP Info" section headers
+  -- (also toggled by :EagleWinToggleHeaders)
+  show_headers = true,
+
+  -- Include LSP hover contents (same content as vim.lsp.buf.hover())
+  show_lsp_info = true,
+
+  -- Close the float when entering the command line
+  close_on_cmd = true,
+
+  -- Debug logging via vim.notify (check :messages)
+  logging = false,
+
+  -- Optional filter, applied when diagnostics are collected. Rejected
+  -- diagnostics never influence whether the float opens.
+  ---@type (fun(d: vim.Diagnostic): boolean?)?
+  diagnostic_filter = nil,
+
+  -- Message rewriters keyed by diagnostic.source. The returned string
+  -- replaces the message and may contain markdown.
+  ---@type table<string, fun(d: vim.Diagnostic): string>
+  source_formatters = {},
+
+  -- Runs after the float window is created (not on in-place updates)
+  ---@type (fun(win: integer, buf: integer))?
+  on_open = nil,
+
+  render = {
+    -- Callout title style per severity. Keys are vim.diagnostic.severity
+    -- names; each entry needs an icon (string prefix) and a highlight group.
+    severity = {
+      ERROR = { icon = "󰅚 ", hl = "DiagnosticError" },
+      WARN = { icon = "󰀪 ", hl = "DiagnosticWarn" },
+      INFO = { icon = "󰋽 ", hl = "DiagnosticInfo" },
+      HINT = { icon = "󰌶 ", hl = "DiagnosticHint" },
+    },
+    -- Expand separators into full-width "─" rules. When false, separators
+    -- stay literal "___" thematic breaks (useful when another plugin, e.g.
+    -- render-markdown.nvim, draws them for you).
+    expand_separators = true,
+    -- Strip backslash over-escaping that some LSP servers apply to markdown
+    -- prose. Code fences and inline code spans are left untouched.
+    unescape = true,
+    -- Applied to the eagle window only
+    conceallevel = 3,
+    concealcursor = "nc",
+  },
+
+  window = {
+    -- "none", "single", "double", "rounded", "solid", "shadow", or a
+    -- border table, see :h nvim_open_win
+    border = "single",
+    title = "",
+    title_pos = "center", -- "left" | "center" | "right"
+    -- Rows between the anchor (mouse/cursor) and the float
+    row_offset = 1,
+    -- Columns the float is shifted left of the anchor
+    col_offset = 5,
+    -- Extra right-side columns for scrollbar plugins
+    scrollbar_offset = 0,
+    -- Size caps, re-evaluated on every render (react to :vsplit / resize)
+    max_width = function()
+      return math.floor(vim.o.columns / 2)
+    end,
+    max_height = function()
+      return math.floor(vim.o.lines / 2.5)
+    end,
+  },
+})
 ```
 
 ## Usage
 
-### Mouse Mode
-
-1. Hover your mouse over any code with diagnostics or LSP information
-2. Keep the mouse idle for the configured delay
-3. The floating window will appear automatically
-4. Move to a different symbol to update the window, move away to close it, or move inside it to be able to scroll through and copy its contents
-
-### Keyboard Mode (assuming `<Tab>` is your custom keybind)
-
-1. Position your cursor on any code with diagnostics or LSP information
-2. Press `<Tab>` and the floating window will appear at your cursor position
-3. Either move away to immediately close the window (eg. pressing `<h>,<j>,<k>,<l>`), or press `<Tab>` again to enter it
-4. Press `<Tab>` one last time to close it (once inside)
-
 ### Commands
 
-| Command | Description |
-|---------|-------------|
-| `:EagleWin` | Toggle the eagle window at the current cursor position |
+| Command | Requires | Behavior |
+|---|---|---|
+| `:EagleWin` | `keyboard.enabled` | Diagnostics + hover for the cursor position. Repeat to focus the float, repeat again to close it. |
+| `:EagleWinLineDiagnostic` | `keyboard.enabled` | Every diagnostic on the cursor line (any column), hover suppressed. Same focus/close cycle. |
+| `:EagleWinToggleHeaders` | any mode | Toggle the section headers. |
+
+### Lua API
+
+```lua
+local eagle = require("eagle")
+eagle.setup(opts)                 -- idempotent; re-running replaces all state
+eagle.is_open()                   -- boolean
+eagle.close()
+eagle.toggle_headers()
+eagle.ignore_next_cursor_move()   -- suppress the next CursorMoved auto-close
+```
+
+`ignore_next_cursor_move()` exists because `noautocmd` cannot suppress `CursorMoved` ([vim/vim#2084](https://github.com/vim/vim/issues/2084)). Call it right before programmatically moving the cursor or switching windows, e.g. in `on_open` keymaps that jump between the float and the parent window:
+
+```lua
+on_open = function(eagle_win, eagle_buf)
+  local parent_win = vim.api.nvim_get_current_win()
+  vim.keymap.set("n", "<Tab>", function()
+    require("eagle").ignore_next_cursor_move()
+    vim.api.nvim_set_current_win(parent_win)
+  end, { buffer = eagle_buf })
+end
+```
+
+### Highlights
+
+| Group | Default link | Applies to |
+|---|---|---|
+| `EagleNormal` | `NormalFloat` | Float background/text |
+| `EagleBorder` | `FloatBorder` | Float border |
+| `EagleTitle` | `FloatTitle` | Float title |
+
+Callout title lines use the per-severity groups from `render.severity` (defaults: `DiagnosticError`, `DiagnosticWarn`, `DiagnosticInfo`, `DiagnosticHint`).
+
+## Migrating from upstream
+
+| Upstream | Here |
+|---|---|
+| `mouse_mode` / `keyboard_mode` | `mouse.enabled` / `keyboard.enabled` |
+| `render_delay` / `detect_idle_timer` | `mouse.render_delay` / `mouse.idle_delay` |
+| `max_width_factor` / `max_height_factor` | `window.max_width()` / `window.max_height()` functions |
+| `window_row` / `window_col` | `window.row_offset` / `window.col_offset` |
+| `border`, `title`, `title_pos`, `scrollbar_offset` | moved under `window.*` |
+| `improved_markdown` | removed; the markdown pipeline is always on (`render.*` options) |
+| `title_color`, `border_color`, `*_header_color`, `*_content_color` | `EagleNormal` / `EagleBorder` / `EagleTitle` highlight groups and `render.severity[*].hl` |
+| `vim.o.mousemoveevent` set manually | set automatically when `mouse.enabled` |
+| `require("eagle").ignore_cursor_moved = true` | `require("eagle").ignore_next_cursor_move()` |
 
 ## Troubleshooting
 
-<details>
-<summary><b>Window doesn't appear when hovering with mouse</b></summary>
-
-Make sure `mousemoveevent` is enabled:
-```lua
-vim.o.mousemoveevent = true
-```
-This must be set for mouse tracking to work.
-</details>
-
-<details>
-<summary><b>Window doesn't appear in keyboard mode</b></summary>
-
-1. Ensure `keyboard_mode = true` in your setup
-2. Make sure you've set a keymap for `:EagleWin`:
-```lua
-vim.keymap.set('n', '<Tab>', ':EagleWin<CR>', { noremap = true, silent = true })
-```
-</details>
-
-<details>
-<summary><b>No LSP information showing</b></summary>
-
-1. Ensure `show_lsp_info = true` (default)
-2. Verify your LSP server is attached: `:LspInfo`
-3. Check if the LSP supports hover: try `:lua vim.lsp.buf.hover()`
-</details>
-
-<details>
-<summary><b>Conflicts with other hover plugins</b></summary>
-
-If you're using other plugins that provide hover functionality (like `noice.nvim` or custom LSP handlers), you may need to disable their hover features or configure them to not conflict with eagle.nvim.
-</details>
-
-<details>
-<summary><b>Enable debug logging</b></summary>
-
-To diagnose issues, enable logging:
-```lua
-require("eagle").setup({
-    logging = true,
-})
-```
-</details>
-
-## Contributing
-
-Contributions are welcome! Here's how you can help:
-
-1. **Report bugs** — Open an issue with reproduction steps
-2. **Suggest features** — Open an issue describing the feature
-3. **Submit PRs** — Fork the repo, make your changes, and submit a pull request
-
-## Support
-
-If you find this plugin useful, consider supporting its development:
-
-- **Star this repository** — It helps others discover the plugin
-- **Provide feedback** — Your input helps improve the plugin
-- **Donate** — [PayPal](https://www.paypal.com/paypalme/soulis1256)
-- **Contact** — [Discord](https://discord.com/users/319490489411829761)
+- **Nothing happens on hover**: check `:lua =vim.o.mousemoveevent` (should be `true` after `setup()` with mouse enabled) and confirm your terminal sends mouse-move events.
+- **Icons render as tofu**: set plain-text icons, e.g. `render.severity.ERROR = { icon = "E ", hl = "DiagnosticError" }`.
+- **Odd rendering in the float**: another markdown plugin may be attaching to the float's `markdown` buffer; configure it to ignore eagle's buffer or adjust `render.conceallevel`.
+- Set `logging = true` and check `:messages`.
 
 ## Acknowledgments
 
-- Inspired by the hover behavior of modern IDEs like VS Code
-- Built on Neovim's powerful [Diagnostic API](https://neovim.io/doc/user/diagnostic.html) and [LSP API](https://neovim.io/doc/user/lsp.html)
-- Thanks to all contributors and users who provide valuable feedback
+All credit for the original idea and design goes to [soulis-1256](https://github.com/soulis-1256), the author of upstream [eagle.nvim](https://github.com/soulis-1256/eagle.nvim). Consider [supporting them](https://www.paypal.com/paypalme/soulis1256).
 
-<p align="center">
-  Made with ❤️ for the Neovim community
-</p>
+## License
+
+[Apache-2.0](./LICENSE)
