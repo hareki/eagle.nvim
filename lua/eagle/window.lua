@@ -1,0 +1,214 @@
+local config = require("eagle.config")
+local log = require("eagle.log")
+local render = require("eagle.render")
+
+local M = {}
+
+local ns = vim.api.nvim_create_namespace("eagle/render")
+
+---@class eagle.WindowState
+---@field win integer?
+---@field buf integer?
+local state = {
+  win = nil,
+  buf = nil,
+}
+
+local WINHIGHLIGHT = "NormalFloat:EagleNormal,FloatBorder:EagleBorder,FloatTitle:EagleTitle"
+
+---Define the eagle highlight groups as default links, so user overrides win.
+---Re-run on ColorScheme, which clears them.
+function M.setup_highlights()
+  local groups = {
+    EagleNormal = "NormalFloat",
+    EagleBorder = "FloatBorder",
+    EagleTitle = "FloatTitle",
+  }
+  for name, link in pairs(groups) do
+    vim.api.nvim_set_hl(0, name, { link = link, default = true })
+  end
+end
+
+---@return integer buf
+local function ensure_buf()
+  if state.buf and vim.api.nvim_buf_is_valid(state.buf) then
+    return state.buf
+  end
+  local buf = vim.api.nvim_create_buf(false, true)
+  vim.bo[buf].filetype = "markdown"
+  local ok, err = pcall(vim.treesitter.start, buf, "markdown")
+  if not ok then
+    log.warn("markdown treesitter unavailable: %s", err)
+  end
+  state.buf = buf
+  return buf
+end
+
+---@return boolean
+function M.is_open()
+  return state.win ~= nil and vim.api.nvim_win_is_valid(state.win)
+end
+
+---@return integer? win
+function M.win()
+  return M.is_open() and state.win or nil
+end
+
+---@return boolean
+function M.is_focused()
+  return M.is_open() and vim.api.nvim_get_current_win() == state.win
+end
+
+function M.focus()
+  if M.is_open() then
+    vim.api.nvim_set_current_win(state.win)
+    vim.api.nvim_win_set_cursor(state.win, { 1, 0 })
+  end
+end
+
+function M.close()
+  if M.is_open() then
+    pcall(vim.api.nvim_win_close, state.win, true)
+  end
+  state.win = nil
+end
+
+---Whether a screen cell lies within the float, including its border ring.
+---@param screenrow integer 1-based screen row
+---@param screencol integer 1-based screen column
+---@return boolean
+function M.contains(screenrow, screencol)
+  if not M.is_open() then
+    return false
+  end
+  local pos = vim.api.nvim_win_get_position(state.win)
+  local top = pos[1] + 1
+  local left = pos[2] + 1
+  local height = vim.api.nvim_win_get_height(state.win)
+  local width = vim.api.nvim_win_get_width(state.win)
+  return screenrow >= top - 1
+    and screenrow <= top + height
+    and screencol >= left - 1
+    and screencol <= left + width
+end
+
+---Whether the float should open above the anchor, based on its screen row.
+---@param anchor "mouse"|"cursor"
+---@return boolean
+function M.render_above(anchor)
+  local screenrow
+  if anchor == "mouse" then
+    screenrow = vim.fn.getmousepos().screenrow
+  else
+    local cursor = vim.api.nvim_win_get_cursor(0)
+    screenrow = vim.fn.screenpos(0, cursor[1], cursor[2] + 1).row
+  end
+  return screenrow > math.floor(vim.o.lines / 2)
+end
+
+---@param result eagle.RenderResult
+---@return integer width
+local function compute_width(result)
+  local opts = config.options.window
+  local content_width = 0
+  for _, line in ipairs(result.lines) do
+    if line ~= render.SEPARATOR then
+      content_width = math.max(content_width, vim.fn.strdisplaywidth(line))
+    end
+  end
+  -- +2: the 1-space left pad plus one spare cell so links stay clickable
+  local max_width = math.min(opts.max_width(), vim.o.columns - 4)
+  return math.max(
+    math.min(content_width + 2 + opts.scrollbar_offset, max_width),
+    math.min(vim.fn.strdisplaywidth(opts.title), vim.o.columns - 4),
+    1
+  )
+end
+
+---@class eagle.OpenOpts
+---@field anchor "mouse"|"cursor"
+---@field render_above boolean
+
+---Open the float, or update it in place when it is already visible.
+---@param result eagle.RenderResult
+---@param opts eagle.OpenOpts
+---@return integer? win
+function M.open(result, opts)
+  local win_opts = config.options.window
+  local buf = ensure_buf()
+
+  local width = compute_width(result)
+  local lines = render.finalize(result, width - 1 - win_opts.scrollbar_offset)
+
+  vim.bo[buf].modifiable = true
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+  vim.bo[buf].modifiable = false
+
+  vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
+  for _, mark in ipairs(result.marks) do
+    vim.hl.range(buf, ns, mark.hl, { mark.line, 0 }, { mark.line, -1 }, { priority = vim.hl.priorities.user })
+  end
+
+  local has_title = win_opts.title ~= ""
+  ---@type vim.api.keyset.win_config
+  local win_config = {
+    relative = opts.anchor,
+    width = width,
+    height = 1,
+    row = 0,
+    col = 0,
+    hide = true,
+    style = "minimal",
+    border = win_opts.border,
+    focusable = true,
+    title = has_title and win_opts.title or nil,
+    title_pos = has_title and win_opts.title_pos or nil,
+  }
+
+  local created = false
+  if M.is_open() then
+    vim.api.nvim_win_set_config(state.win, win_config)
+  else
+    state.win = vim.api.nvim_open_win(buf, false, win_config)
+    created = true
+
+    local window_options = {
+      wrap = true,
+      linebreak = true,
+      breakindent = true,
+      conceallevel = config.options.render.conceallevel,
+      concealcursor = config.options.render.concealcursor,
+      winhighlight = WINHIGHLIGHT,
+    }
+    for name, value in pairs(window_options) do
+      vim.api.nvim_set_option_value(name, value, { win = state.win })
+    end
+
+    -- The single point where close is observed, whoever closes the window.
+    vim.api.nvim_create_autocmd("WinClosed", {
+      pattern = tostring(state.win),
+      once = true,
+      callback = function()
+        state.win = nil
+      end,
+    })
+  end
+
+  -- Measure the wrapped (and conceal-aware) display height, then position.
+  local text_height = vim.api.nvim_win_text_height(state.win, {}).all
+  local max_height = math.min(win_opts.max_height(), vim.o.lines - 4)
+  local height = math.max(math.min(text_height, max_height), 1)
+  local border_rows = win_opts.border ~= "none" and 2 or 0
+  win_config.height = height
+  win_config.row = opts.render_above and -(height + border_rows + win_opts.row_offset) or win_opts.row_offset
+  win_config.col = -win_opts.col_offset
+  win_config.hide = false
+  vim.api.nvim_win_set_config(state.win, win_config)
+
+  if created and config.options.on_open then
+    config.options.on_open(state.win, buf)
+  end
+  return state.win
+end
+
+return M
