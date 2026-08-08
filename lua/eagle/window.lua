@@ -89,18 +89,25 @@ function M.contains(screenrow, screencol)
   return screenrow >= top - 1 and screenrow <= top + height and screencol >= left - 1 and screencol <= left + width
 end
 
+---Screen position of the anchor point (1-based).
+---@param anchor "mouse"|"cursor"
+---@return integer screenrow
+---@return integer screencol
+local function anchor_screenpos(anchor)
+  if anchor == "mouse" then
+    local mpos = vim.fn.getmousepos()
+    return mpos.screenrow, mpos.screencol
+  end
+  local cursor = vim.api.nvim_win_get_cursor(0)
+  local pos = vim.fn.screenpos(0, cursor[1], cursor[2] + 1)
+  return pos.row, pos.col
+end
+
 ---Whether the float should open above the anchor, based on its screen row.
 ---@param anchor "mouse"|"cursor"
 ---@return boolean
 function M.render_above(anchor)
-  local screenrow
-  if anchor == "mouse" then
-    screenrow = vim.fn.getmousepos().screenrow
-  else
-    local cursor = vim.api.nvim_win_get_cursor(0)
-    screenrow = vim.fn.screenpos(0, cursor[1], cursor[2] + 1).row
-  end
-  return screenrow > math.floor(vim.o.lines / 2)
+  return anchor_screenpos(anchor) > math.floor(vim.o.lines / 2)
 end
 
 ---@param result eagle.RenderResult
@@ -196,9 +203,11 @@ function M.open(result, opts)
   local max_height = math.min(win_opts.max_height(), vim.o.lines - 4)
   local height = math.max(math.min(text_height, max_height), 1)
   local border_rows = win_opts.border ~= "none" and 2 or 0
+  local _, anchor_col = anchor_screenpos(opts.anchor)
   win_config.height = height
   win_config.row = opts.render_above and -(height + border_rows + win_opts.row_offset) or win_opts.row_offset
-  win_config.col = -win_opts.col_offset
+  -- clamp the left shift so the float never clips off the screen edge
+  win_config.col = -math.min(win_opts.col_offset, math.max(anchor_col - 1, 0))
   win_config.hide = false
   vim.api.nvim_win_set_config(state.win, win_config)
 
