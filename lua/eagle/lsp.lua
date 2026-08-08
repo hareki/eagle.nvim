@@ -15,33 +15,43 @@ end
 
 ---@param line string
 ---@return boolean
-local function is_blank(line)
-  return line:match("^%s*$") ~= nil or line:match("^%s*%-%-%-+%s*$") ~= nil
+local function is_rule(line)
+  return line:match("^%s*%-%-%-+%s*$") ~= nil or line:match("^%s*___+%s*$") ~= nil
 end
 
----Convert one client's hover result into markdown lines.
----Returns nil when the payload has no real content (only blanks or rules).
+---Convert one client's hover result into markdown lines, compacted: blank
+---lines are dropped (except inside code fences, where they are real code) and
+---separator rules at the section edges are stripped, so a payload that ends
+---with "---" does not render a dangling rule. Returns nil when nothing but
+---blanks and rules remain.
 ---@param result lsp.Hover?
 ---@return string[]?
 local function to_section(result)
   if not result or not result.contents then
     return nil
   end
-  local lines = vim.lsp.util.convert_input_to_markdown_lines(result.contents)
-  local first, last = 1, #lines
-  while first <= last and lines[first]:match("^%s*$") do
-    first = first + 1
-  end
-  while last >= first and lines[last]:match("^%s*$") do
-    last = last - 1
-  end
   local section = {}
+  local in_fence = false
   local has_content = false
-  for i = first, last do
-    section[#section + 1] = lines[i]
-    has_content = has_content or not is_blank(lines[i])
+  for _, line in ipairs(vim.lsp.util.convert_input_to_markdown_lines(result.contents)) do
+    if line:match("^%s*```") then
+      in_fence = not in_fence
+      section[#section + 1] = line
+      has_content = true
+    elseif in_fence then
+      section[#section + 1] = line
+    elseif not line:match("^%s*$") then
+      section[#section + 1] = line
+      has_content = has_content or not is_rule(line)
+    end
   end
-  if not has_content then
+  while section[1] and is_rule(section[1]) do
+    table.remove(section, 1)
+  end
+  while section[#section] and is_rule(section[#section]) do
+    table.remove(section)
+  end
+  if #section == 0 or not has_content then
     return nil
   end
   return section
