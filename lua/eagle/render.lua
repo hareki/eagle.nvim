@@ -1,4 +1,5 @@
 local config = require("eagle.config")
+local log = require("eagle.log")
 
 local M = {}
 
@@ -109,8 +110,16 @@ local function diagnostics_block(diags)
     marks[#marks + 1] = { line = #out, hl = style.hl }
     out[#out + 1] = style.icon .. (format_meta(d) or name)
 
+    local message = d.message
     local formatter = d.source and config.options.source_formatters[d.source]
-    local message = formatter and formatter(d) or d.message
+    if formatter then
+      local ok, formatted = pcall(formatter, d)
+      if ok and type(formatted) == "string" then
+        message = formatted
+      elseif not ok then
+        log.warn("source_formatters[%s] failed: %s", d.source, formatted)
+      end
+    end
     append_markdown(out, vim.split(message, "\n", { plain = true, trimempty = true }))
 
     local href = vim.tbl_get(d, "user_data", "lsp", "codeDescription", "href")
