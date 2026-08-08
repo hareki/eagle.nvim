@@ -73,20 +73,14 @@ function M.close()
   state.win = nil
 end
 
----Whether a screen cell lies within the float, including its border ring.
----@param screenrow integer 1-based screen row
----@param screencol integer 1-based screen column
+---Whether the mouse is over the float, border included. Border (and shadow)
+---cells belong to the float's grid, so getmousepos() reports the float's
+---winid for them; this stays correct for every border style, unlike screen
+---coordinate math.
+---@param mpos table getmousepos() result
 ---@return boolean
-function M.contains(screenrow, screencol)
-  if not M.is_open() then
-    return false
-  end
-  local pos = vim.api.nvim_win_get_position(state.win)
-  local top = pos[1] + 1
-  local left = pos[2] + 1
-  local height = vim.api.nvim_win_get_height(state.win)
-  local width = vim.api.nvim_win_get_width(state.win)
-  return screenrow >= top - 1 and screenrow <= top + height and screencol >= left - 1 and screencol <= left + width
+function M.contains(mpos)
+  return M.is_open() and mpos.winid == state.win
 end
 
 ---Screen position of the anchor point (1-based).
@@ -127,6 +121,32 @@ local function compute_width(result)
     math.min(vim.fn.strdisplaywidth(opts.title), vim.o.columns - 4),
     1
   )
+end
+
+---Rows the border adds above and below the content. A side is drawn iff its
+---edge char is non-empty; char lists repeat cyclically to fill the 8 slots
+---(:h nvim_open_win), and empty corner slots add nothing. "shadow" only pads
+---the bottom and right.
+---@return integer rows
+local function border_rows()
+  local border = config.options.window.border
+  if type(border) == "string" then
+    if border == "none" then
+      return 0
+    end
+    return border == "shadow" and 1 or 2
+  end
+  local rows = 0
+  for _, slot in ipairs({ 2, 6 }) do -- top and bottom edge slots, clockwise from top-left
+    local char = border[(slot - 1) % #border + 1]
+    if type(char) == "table" then
+      char = char[1]
+    end
+    if char ~= "" then
+      rows = rows + 1
+    end
+  end
+  return rows
 end
 
 ---@class eagle.OpenOpts
@@ -202,10 +222,9 @@ function M.open(result, opts)
   local text_height = vim.api.nvim_win_text_height(state.win, {}).all
   local max_height = math.min(win_opts.max_height(), vim.o.lines - 4)
   local height = math.max(math.min(text_height, max_height), 1)
-  local border_rows = win_opts.border ~= "none" and 2 or 0
   local _, anchor_col = anchor_screenpos(opts.anchor)
   win_config.height = height
-  win_config.row = opts.render_above and -(height + border_rows + win_opts.row_offset) or win_opts.row_offset
+  win_config.row = opts.render_above and -(height + border_rows() + win_opts.row_offset) or win_opts.row_offset
   -- clamp the left shift so the float never clips off the screen edge
   win_config.col = -math.min(win_opts.col_offset, math.max(anchor_col - 1, 0))
   win_config.hide = false

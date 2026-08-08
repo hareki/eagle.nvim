@@ -28,6 +28,11 @@ end
 function M.toggle_headers()
   config.options.show_headers = not config.options.show_headers
   require("eagle.window").close()
+  if package.loaded["eagle.mouse"] then
+    -- forget the shown content, or the next render is skipped as a duplicate
+    -- and the toggle only takes effect after the mouse leaves the symbol
+    require("eagle.mouse").reset()
+  end
   return config.options.show_headers
 end
 

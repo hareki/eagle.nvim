@@ -68,7 +68,8 @@ function M.hover(buf, pos, callback)
     cancel()
     cancel = nil
   end
-  cancel = vim.lsp.buf_request_all(buf, "textDocument/hover", function(client)
+  local this_cancel
+  this_cancel = vim.lsp.buf_request_all(buf, "textDocument/hover", function(client)
     local line = vim.api.nvim_buf_get_lines(buf, pos.row, pos.row + 1, false)[1] or ""
     return {
       textDocument = vim.lsp.util.make_text_document_params(buf),
@@ -78,6 +79,11 @@ function M.hover(buf, pos, callback)
       },
     }
   end, function(results)
+    -- a cancelled request may still get a late (or error) response; only the
+    -- request that owns the slot may clear it and report back
+    if cancel ~= this_cancel then
+      return
+    end
     cancel = nil
     local ids = vim.tbl_keys(results)
     table.sort(ids)
@@ -95,6 +101,7 @@ function M.hover(buf, pos, callback)
     end
     callback(sections)
   end)
+  cancel = this_cancel
 end
 
 return M

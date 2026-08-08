@@ -136,9 +136,22 @@ local function validate()
   o.mouse.idle_delay = math.max(o.mouse.idle_delay, 0)
 end
 
+---Top-level keys that default to nil and therefore do not appear in defaults.
+local NILABLE_KEYS = { diagnostic_filter = true, on_open = true }
+
 ---@param options eagle.Config|table|nil
 function M.setup(options)
-  M.options = vim.tbl_deep_extend("force", vim.deepcopy(defaults), options or {})
+  options = options or {}
+  for key in pairs(options) do
+    if defaults[key] == nil and not NILABLE_KEYS[key] then
+      -- vim.notify instead of eagle.log to avoid a circular require
+      vim.notify(
+        ("[eagle] unknown option %s, see the README for the current schema"):format(tostring(key)),
+        vim.log.levels.WARN
+      )
+    end
+  end
+  M.options = vim.tbl_deep_extend("force", vim.deepcopy(defaults), options)
   validate()
 end
 
