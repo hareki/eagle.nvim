@@ -114,6 +114,13 @@ require("eagle").setup({
     -- Applied to the eagle window only
     conceallevel = 3,
     concealcursor = "nc",
+    -- Rows your markdown renderer conceals per fenced code block. eagle sizes
+    -- the float before such a renderer decorates the buffer, so it cannot see
+    -- those rows vanish and would leave a blank row behind. Set 1 for
+    -- render-markdown.nvim's default code.border = "hide" (closing fence
+    -- concealed, opening fence kept as the language line), or 2 if the opening
+    -- fence is concealed too.
+    concealed_fence_rows = 0,
   },
 
   window = {
@@ -201,6 +208,7 @@ Callout title lines use the per-severity groups from `render.severity` (defaults
 - **Nothing happens on hover**: check `:lua =vim.o.mousemoveevent` (should be `true` after `setup()` with mouse enabled) and confirm your terminal sends mouse-move events.
 - **Icons render as tofu**: set plain-text icons, e.g. `render.severity.ERROR = { icon = "E ", hl = "DiagnosticError" }`.
 - **Odd rendering in the float**: another markdown plugin may be attaching to the float's `markdown` buffer; configure it to ignore eagle's buffer or adjust `render.conceallevel`.
+- **A blank row below a code block**: that plugin is concealing fence lines after eagle has already sized the float. Tell eagle how many rows it hides per code block with `render.concealed_fence_rows` (`1` for render-markdown.nvim's defaults).
 - Set `logging = true` and check `:messages`.
 
 ## Acknowledgments

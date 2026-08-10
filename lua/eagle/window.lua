@@ -218,8 +218,12 @@ function M.open(result, opts)
     })
   end
 
-  -- Measure the wrapped (and conceal-aware) display height, then position.
-  local text_height = vim.api.nvim_win_text_height(state.win, {}).all
+  -- Measure the wrapped (and conceal-aware) display height, then position. The
+  -- measurement only sees concealment that exists by now, i.e. treesitter
+  -- @conceal; a renderer that hides fence lines from a decoration provider draws
+  -- after this, so those rows are compensated for by config instead.
+  local hidden = result.fences * config.options.render.concealed_fence_rows
+  local text_height = vim.api.nvim_win_text_height(state.win, {}).all - hidden
   local max_height = math.min(win_opts.max_height(), vim.o.lines - 4)
   local height = math.max(math.min(text_height, max_height), 1)
   local _, anchor_col = anchor_screenpos(opts.anchor)

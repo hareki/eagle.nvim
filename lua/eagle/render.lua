@@ -16,6 +16,7 @@ M.SEPARATOR = "___"
 ---@class eagle.RenderResult
 ---@field lines string[]
 ---@field marks eagle.RenderMark[]
+---@field fences integer complete fenced code blocks in lines
 
 ---@class eagle.RenderContent
 ---@field diagnostics vim.Diagnostic[]
@@ -57,10 +58,15 @@ end
 ---sentinel and unescaping prose. Fenced code blocks pass through untouched.
 ---@param out string[]
 ---@param lines string[]
+---@return integer fences complete fenced code blocks appended
 local function append_markdown(out, lines)
   local in_fence = false
+  local fences = 0
   for _, line in ipairs(lines) do
     if line:match("^%s*```") then
+      if in_fence then
+        fences = fences + 1
+      end
       in_fence = not in_fence
       out[#out + 1] = line
     elseif in_fence then
@@ -73,6 +79,7 @@ local function append_markdown(out, lines)
       out[#out + 1] = line
     end
   end
+  return fences
 end
 
 ---Severity name and style with safe fallbacks for exotic diagnostics.
@@ -98,9 +105,11 @@ end
 ---@param diags vim.Diagnostic[]
 ---@return string[] lines
 ---@return eagle.RenderMark[] marks 0-indexed within the returned lines
+---@return integer fences complete fenced code blocks in lines
 local function diagnostics_block(diags)
   local out = {}
   local marks = {}
+  local fences = 0
   for i, d in ipairs(diags) do
     if i > 1 then
       out[#out + 1] = M.SEPARATOR
@@ -120,27 +129,29 @@ local function diagnostics_block(diags)
         log.warn("source_formatters[%s] failed: %s", d.source, formatted)
       end
     end
-    append_markdown(out, vim.split(message, "\n", { plain = true, trimempty = true }))
+    fences = fences + append_markdown(out, vim.split(message, "\n", { plain = true, trimempty = true }))
 
     local href = vim.tbl_get(d, "user_data", "lsp", "codeDescription", "href")
     if href then
       out[#out + 1] = ("[View documents](%s)"):format(href)
     end
   end
-  return out, marks
+  return out, marks, fences
 end
 
 ---@param sections string[][]
----@return string[]
+---@return string[] lines
+---@return integer fences complete fenced code blocks in lines
 local function hover_block(sections)
   local out = {}
+  local fences = 0
   for i, section in ipairs(sections) do
     if i > 1 then
       out[#out + 1] = M.SEPARATOR
     end
-    append_markdown(out, section)
+    fences = fences + append_markdown(out, section)
   end
-  return out
+  return out, fences
 end
 
 ---Build the eagle buffer content from structured diagnostics and hover data.
@@ -148,8 +159,8 @@ end
 ---@param ctx eagle.RenderContext
 ---@return eagle.RenderResult
 function M.compose(content, ctx)
-  local diag_lines, diag_marks = diagnostics_block(content.diagnostics)
-  local hover_lines = hover_block(content.hover)
+  local diag_lines, diag_marks, diag_fences = diagnostics_block(content.diagnostics)
+  local hover_lines, hover_fences = hover_block(content.hover)
 
   local order = config.options.order
   local diag_first = order == 1 or (order == 2 and ctx.render_above) or (order == 4 and not ctx.render_above)
@@ -187,7 +198,7 @@ function M.compose(content, ctx)
     append_block(diag_lines, diag_marks, "# Diagnostics")
   end
 
-  return { lines = lines, marks = marks }
+  return { lines = lines, marks = marks, fences = diag_fences + hover_fences }
 end
 
 ---Expand separator sentinels and apply the 1-space left pad. Line count and

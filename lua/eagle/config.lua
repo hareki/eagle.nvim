@@ -20,6 +20,9 @@ local M = {}
 ---@field unescape boolean Strip LSP-server backslash over-escaping outside code.
 ---@field conceallevel integer Applied to the eagle window only.
 ---@field concealcursor string Applied to the eagle window only.
+---@field concealed_fence_rows integer Rows a third-party markdown renderer hides
+---per fenced code block. eagle measures the float before such a renderer draws,
+---so it cannot see those rows disappear; this is subtracted from the measurement.
 
 ---@class eagle.WindowOpts
 ---@field border string|string[] See :h nvim_open_win.
@@ -78,6 +81,7 @@ local defaults = {
     unescape = true,
     conceallevel = 3,
     concealcursor = "nc",
+    concealed_fence_rows = 0,
   },
   window = {
     border = "single",
@@ -123,6 +127,7 @@ local function validate()
   vim.validate("render.unescape", o.render.unescape, "boolean")
   vim.validate("render.conceallevel", o.render.conceallevel, "number")
   vim.validate("render.concealcursor", o.render.concealcursor, "string")
+  vim.validate("render.concealed_fence_rows", o.render.concealed_fence_rows, "number")
   vim.validate("window.border", o.window.border, { "string", "table" })
   vim.validate("window.title", o.window.title, "string")
   vim.validate("window.title_pos", o.window.title_pos, "string")
@@ -134,6 +139,7 @@ local function validate()
 
   o.mouse.render_delay = math.max(o.mouse.render_delay, 0)
   o.mouse.idle_delay = math.max(o.mouse.idle_delay, 0)
+  o.render.concealed_fence_rows = math.max(o.render.concealed_fence_rows, 0)
 end
 
 ---Top-level keys that default to nil and therefore do not appear in defaults.
