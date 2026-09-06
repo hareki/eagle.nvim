@@ -164,11 +164,11 @@ function M.open(result, opts)
   local width = compute_width(result)
   local lines = render.finalize(result, width - 1 - win_opts.scrollbar_offset)
 
+  vim.api.nvim_buf_clear_namespace(buf, -1, 0, -1)
   vim.bo[buf].modifiable = true
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
   vim.bo[buf].modifiable = false
 
-  vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
   for _, mark in ipairs(result.marks) do
     vim.hl.range(buf, ns, mark.hl, { mark.line, 0 }, { mark.line, -1 }, { priority = vim.hl.priorities.user })
   end
